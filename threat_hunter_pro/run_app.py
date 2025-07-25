@@ -32,9 +32,16 @@ def main():
             from . import state  
             from .app import app
         except ImportError:
-            # Fall back to absolute imports if needed
-            import config, state
-            from app import app
+            # Fall back to absolute imports if run directly
+            import os
+            import sys
+            # Add parent directory to path for absolute imports
+            parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+            
+            from threat_hunter_pro import config, state
+            from threat_hunter_pro.app import app
         
         # Check environment variables
         if not config.GEMINI_API_KEYS:
@@ -69,7 +76,10 @@ def main():
         print("Initializing vector database...")
         try:
             import asyncio
-            from .vector_db import initialize_vector_db
+            try:
+                from .vector_db import initialize_vector_db
+            except ImportError:
+                from threat_hunter_pro.vector_db import initialize_vector_db
             asyncio.run(initialize_vector_db())
             print("[OK] Vector database initialized")
         except Exception as e:
@@ -79,7 +89,10 @@ def main():
         # Start background worker
         print("Starting background worker...")
         try:
-            from .worker import background_worker
+            try:
+                from .worker import background_worker
+            except ImportError:
+                from threat_hunter_pro.worker import background_worker
             worker_thread = threading.Thread(
                 target=background_worker, 
                 daemon=True, 
