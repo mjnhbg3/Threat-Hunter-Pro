@@ -62,7 +62,7 @@ EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "gemini")  # Default to Gem
 
 # Gemini Embedding Model Configuration
 GEMINI_EMBEDDING_MODEL = "gemini-embedding-001"
-GEMINI_EMBEDDING_DIMENSION = 3072  # Default dimension for gemini-embedding-001
+GEMINI_EMBEDDING_DIMENSION = 768  # Recommended dimension for gemini-embedding-001
 GEMINI_EMBEDDING_TASK = "RETRIEVAL_DOCUMENT"  # Optimized for document retrieval
 
 # Legacy sentence-transformers model (fallback)

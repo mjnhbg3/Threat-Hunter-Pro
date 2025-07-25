@@ -33,7 +33,7 @@ class GeminiEmbeddingClient:
     def __init__(self):
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
         self.model_name = "gemini-embedding-001"
-        self.dimension = 3072  # Default dimension for gemini-embedding-001
+        self.dimension = 768  # Recommended dimension for gemini-embedding-001
         self.task_type = "RETRIEVAL_DOCUMENT"  # Optimized for document retrieval
         self.current_key_index = 0
         self.http_client: Optional[httpx.AsyncClient] = None
@@ -166,17 +166,29 @@ class GeminiEmbeddingClient:
         # Prepare request payload - correct format for Gemini embedding API
         contents = []
         for text in texts:
+            # Truncate very long texts to avoid API limits (rough estimate: ~30k chars max)
+            truncated_text = text[:30000] if len(text) > 30000 else text
             contents.append({
-                "parts": [{"text": text}]
+                "parts": [{"text": truncated_text}]
             })
         
+        # Try minimal payload first to debug - remove embedding_config temporarily
         payload = {
-            "contents": contents,
-            "embedding_config": {
-                "task_type": self.task_type,
-                "output_dimensionality": self.dimension
-            }
+            "contents": contents
         }
+        
+        # TODO: Re-enable embedding_config after basic request works
+        # if self.task_type != "SEMANTIC_SIMILARITY" or self.dimension != 768:
+        #     payload["embedding_config"] = {
+        #         "task_type": self.task_type,
+        #         "output_dimensionality": self.dimension
+        #     }
+        
+        # Debug logging to see actual request
+        logging.info(f"Gemini API URL: {url}")
+        logging.info(f"Gemini API Headers: {headers}")
+        logging.info(f"Text lengths: {[len(text) for text in texts]}")
+        logging.info(f"Gemini API Payload: {json.dumps(payload, indent=2)[:500]}...")  # Truncate for readability
         
         try:
             response = await client.post(url, headers=headers, json=payload)
@@ -201,6 +213,15 @@ class GeminiEmbeddingClient:
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 logging.warning(f"Rate limit hit for embedding API: {e}")
+                raise
+            elif e.response.status_code == 400:
+                try:
+                    error_body = e.response.json()
+                    logging.error(f"400 Bad Request - Response body: {json.dumps(error_body, indent=2)}")
+                except:
+                    error_body = e.response.text
+                    logging.error(f"400 Bad Request - Response text: {error_body}")
+                logging.error(f"Request payload that caused error: {json.dumps(payload, indent=2)}")
                 raise
             else:
                 logging.error(f"HTTP error in embedding request: {e}")
