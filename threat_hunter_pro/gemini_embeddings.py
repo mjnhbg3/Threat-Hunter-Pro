@@ -163,19 +163,21 @@ class GeminiEmbeddingClient:
             "x-goog-api-key": api_key
         }
         
-        # Prepare request payload
-        requests = []
+        # Prepare request payload - correct format for Gemini embedding API
+        contents = []
         for text in texts:
-            requests.append({
-                "model": f"models/{self.model_name}",
-                "content": {
-                    "parts": [{"text": text}]
-                },
-                "taskType": self.task_type,
-                "outputDimensionality": self.dimension
+            contents.append({
+                "parts": [{"text": text}]
             })
         
-        payload = {"requests": requests}
+        payload = {
+            "model": f"models/{self.model_name}",
+            "contents": contents,
+            "embedding_config": {
+                "task_type": self.task_type,
+                "output_dimensionality": self.dimension
+            }
+        }
         
         try:
             response = await client.post(url, headers=headers, json=payload)
