@@ -636,45 +636,50 @@ async def analyze_comprehensive_issues(logs: List[Dict[str, Any]]) -> Dict[str, 
     # Prepare log context for comprehensive analysis
     log_context = prepare_full_log_context(logs[:100])  # Analyze up to 100 recent logs
     
-    prompt = f"""You are a security and system analyst. Analyze these logs and identify issues in two categories:
+    prompt = f"""You are a security and system analyst. Analyze these logs and AGGRESSIVELY identify ANY issues that warrant attention.
 
-SECURITY ISSUES: Threats, attacks, unauthorized access, suspicious activities
-OPERATIONAL ISSUES: Performance problems, system errors, misconfigurations, resource issues
+FIND ISSUES IN THESE CATEGORIES:
+- SECURITY: Failed logins, privilege changes, suspicious network activity, authentication issues, access violations
+- OPERATIONAL: Error messages, service failures, high resource usage, configuration problems, repeated warnings
 
-Return ONLY this exact JSON format:
+You MUST look for patterns like:
+- Multiple failures from same source
+- Error codes and exception messages  
+- Authentication or authorization failures
+- System service problems
+- Network connectivity issues
+- Resource exhaustion signs
+- Configuration mismatches
+
+Return this JSON format:
 
 {{
 "security_issues": [
 {{
 "severity": "High",
-"title": "Issue title here", 
-"summary": "What the issue is and why it matters",
-"recommendation": "What to do about it",
-"related_logs": ["hash1", "hash2"]
+"title": "Specific issue found",
+"summary": "What happened and why it's concerning", 
+"recommendation": "How to investigate or fix it",
+"related_logs": ["actual_sha256_hash_from_logs"]
 }}
 ],
 "operational_issues": [
 {{
-"severity": "Medium",
-"title": "Issue title here",
-"summary": "What the issue is and why it matters", 
-"recommendation": "What to do about it",
-"related_logs": ["hash1", "hash2"]
+"severity": "Medium", 
+"title": "Specific operational problem",
+"summary": "What's wrong and the impact",
+"recommendation": "Steps to resolve",
+"related_logs": ["actual_sha256_hash_from_logs"]
 }}
 ]
 }}
 
-Guidelines:
-- Be thorough in identifying issues
-- Look for error patterns, failures, unusual activities
-- Use severity: Critical, High, Medium, or Low
-- Include actual SHA256 hashes from logs in related_logs
-- If no issues found, use empty arrays: []
+CRITICAL: Do NOT return empty arrays unless you've thoroughly analyzed every log entry and found absolutely nothing suspicious, concerning, or problematic. Look harder for patterns, errors, failures, or anomalies.
 
-LOG DATA:
-{log_context[:10000]}
+LOG DATA TO ANALYZE:
+{log_context[:15000]}
 
-Return ONLY the JSON object starting with {{ and ending with }}."""
+Return ONLY the JSON object."""
 
     try:
         logging.info(f"Sending comprehensive analysis prompt to AI with {len(logs)} logs")
@@ -688,6 +693,15 @@ Return ONLY the JSON object starting with {{ and ending with }}."""
             return {"security_issues": [], "operational_issues": []}
         
         result = json.loads(json_str)
+        
+        # Handle wrapped response from Gemini API
+        if "response" in result and isinstance(result["response"], str):
+            try:
+                result = json.loads(result["response"])
+                logging.info("Unwrapped nested JSON response from AI")
+            except json.JSONDecodeError:
+                logging.warning("Failed to parse nested response JSON")
+                return {"security_issues": [], "operational_issues": []}
         
         # Validate structure
         if not isinstance(result, dict):
