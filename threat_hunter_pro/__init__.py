@@ -28,3 +28,7 @@
 
 # Nothing is executed on import of this package; see ``main.py`` for
 # application startup.
+
+__version__ = "2.0.0"
+__author__ = "Threat Hunter Pro Development Team"
+__description__ = "Advanced Security Log Analysis with Gemini AI"

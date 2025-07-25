@@ -17,8 +17,8 @@ from typing import List, Dict, Any, Optional, Union
 import httpx
 import numpy as np
 
-from config import GEMINI_API_KEYS
-from token_bucket import TokenBucket
+from .config import GEMINI_API_KEYS
+from .token_bucket import TokenBucket
 
 
 class GeminiEmbeddingClient:

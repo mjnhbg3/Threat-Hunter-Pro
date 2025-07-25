@@ -27,12 +27,12 @@ def main():
     try:
         # Import modules - try both relative and direct imports
         try:
-            # Try direct imports first
-            import config
-            import state  
-            from app import app
+            # Use relative imports for package structure
+            from . import config
+            from . import state  
+            from .app import app
         except ImportError:
-            # Fall back to relative imports if direct imports fail
+            # Fall back to absolute imports if needed
             import config, state
             from app import app
         
@@ -69,7 +69,7 @@ def main():
         print("Initializing vector database...")
         try:
             import asyncio
-            from vector_db import initialize_vector_db
+            from .vector_db import initialize_vector_db
             asyncio.run(initialize_vector_db())
             print("[OK] Vector database initialized")
         except Exception as e:
@@ -79,7 +79,7 @@ def main():
         # Start background worker
         print("Starting background worker...")
         try:
-            from worker import background_worker
+            from .worker import background_worker
             worker_thread = threading.Thread(
                 target=background_worker, 
                 daemon=True, 

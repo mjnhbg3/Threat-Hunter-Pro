@@ -19,8 +19,8 @@ import numpy as np
 import faiss
 from typing import List, Any, Dict
 
-import state
-from config import (
+from . import state
+from .config import (
     DB_DIR,
     VECTOR_DB_FILE,
     METADATA_DB_FILE,
@@ -29,16 +29,16 @@ from config import (
     EMBEDDING_DIMENSION,
     SENTENCE_TRANSFORMERS_MODEL,
 )
-from token_bucket import TokenBucket  # Imported to hint at rate limiting usage
+from .token_bucket import TokenBucket  # Imported to hint at rate limiting usage
 
-from persistence import save_dashboard_data  # Needed for clear_database
+from .persistence import save_dashboard_data  # Needed for clear_database
 
 # Import NER functionality for entity extraction and boosting
-from ner_utils import extract_entities, initialize_ner
+from .ner_utils import extract_entities, initialize_ner
 
 # Conditional imports based on embedding provider
 if EMBEDDING_PROVIDER == "gemini":
-    from gemini_embeddings import get_gemini_embedding_client, close_gemini_embedding_client, is_gemini_exhausted
+    from .gemini_embeddings import get_gemini_embedding_client, close_gemini_embedding_client, is_gemini_exhausted
     try:
         from sentence_transformers import SentenceTransformer
         SENTENCE_TRANSFORMERS_AVAILABLE = True

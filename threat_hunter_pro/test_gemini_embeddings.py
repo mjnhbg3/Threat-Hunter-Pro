@@ -30,14 +30,14 @@ async def test_gemini_embeddings():
     try:
         # Test 1: Configuration validation
         print("Test 1: Configuration and imports...")
-        from config import EMBEDDING_PROVIDER, GEMINI_EMBEDDING_MODEL, EMBEDDING_DIMENSION
+        from .config import EMBEDDING_PROVIDER, GEMINI_EMBEDDING_MODEL, EMBEDDING_DIMENSION
         print(f"✓ Embedding provider: {EMBEDDING_PROVIDER}")
         print(f"✓ Gemini model: {GEMINI_EMBEDDING_MODEL}")
         print(f"✓ Embedding dimension: {EMBEDDING_DIMENSION}")
         
         # Test 2: Rate limits validation
         print("\nTest 2: Rate limits validation...")
-        from config import MODEL_QUOTA
+        from .config import MODEL_QUOTA
         if 'embedding' in MODEL_QUOTA:
             rpm, tpm, rpd = MODEL_QUOTA['embedding']
             print(f"✓ Embedding rate limits: {rpm} RPM, {tpm} TPM, {rpd} RPD")
@@ -50,7 +50,7 @@ async def test_gemini_embeddings():
         
         # Test 3: Gemini client initialization
         print("\nTest 3: Gemini client initialization...")
-        from gemini_embeddings import get_gemini_embedding_client
+        from .gemini_embeddings import get_gemini_embedding_client
         client = await get_gemini_embedding_client()
         print(f"✓ Gemini client initialized: {type(client).__name__}")
         print(f"✓ Model: {client.model_name}")
@@ -59,8 +59,8 @@ async def test_gemini_embeddings():
         # Test 4: Vector database integration
         print("\nTest 4: Vector database integration...")
         try:
-            import state
-            from vector_db import initialize_vector_db
+            from . import state
+            from .vector_db import initialize_vector_db
             
             # Initialize state for testing
             state.dashboard_data = {
@@ -105,7 +105,7 @@ async def test_gemini_embeddings():
         # Test 6: Fallback functionality
         print("\nTest 6: Fallback functionality...")
         try:
-            from gemini_embeddings import is_gemini_exhausted
+            from .gemini_embeddings import is_gemini_exhausted
             print(f"✓ Gemini exhaustion check available: {is_gemini_exhausted()}") 
         except Exception as e:
             print(f"✗ Fallback functionality test failed: {e}")
