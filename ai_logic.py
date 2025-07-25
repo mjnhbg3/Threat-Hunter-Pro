@@ -623,6 +623,76 @@ Output ONLY the combined comprehensive summary text.
 # Issue analysis
 # -----------------------------------------------------------------------------
 
+def detect_pattern_based_issues(logs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Detect obvious security patterns that should always be flagged as issues.
+    Returns a list of pre-identified issues for rule-based detection.
+    """
+    issues = []
+    
+    # Group logs by agent and event type for pattern detection
+    from collections import defaultdict
+    
+    # Track cryptographic failures (Event ID 5061)
+    crypto_failures = defaultdict(list)
+    auth_failures = defaultdict(list)
+    privilege_elevations = []
+    
+    for log in logs:
+        agent_name = log.get('agent', {}).get('name', 'unknown')
+        rule_id = log.get('rule', {}).get('id', '')
+        data = log.get('data', {})
+        
+        # Windows Event ID 5061 - Cryptographic operation failed
+        if 'win.eventdata.eventID' in data and data.get('win.eventdata.eventID') == '5061':
+            crypto_failures[agent_name].append(log)
+        
+        # Windows Event ID 4625 - Failed logon
+        elif 'win.eventdata.eventID' in data and data.get('win.eventdata.eventID') == '4625':
+            auth_failures[agent_name].append(log)
+            
+        # Windows Event ID 4672 - Special privileges assigned to new logon
+        elif 'win.eventdata.eventID' in data and data.get('win.eventdata.eventID') == '4672':
+            privilege_elevations.append(log)
+    
+    # Create issues for concentrated cryptographic failures
+    for agent, failures in crypto_failures.items():
+        if len(failures) >= 5:  # 5 or more crypto failures from same agent
+            issue = {
+                "severity": "High",
+                "title": f"Multiple Cryptographic Operation Failures on {agent}",
+                "summary": f"Detected {len(failures)} cryptographic operation failures on agent {agent}. This could indicate system compromise, malware activity, or critical system misconfiguration requiring immediate investigation.",
+                "recommendation": f"1. Immediately investigate agent {agent} for signs of compromise\n2. Check running processes and services for anomalous cryptographic operations\n3. Review recent software installations or updates\n4. Examine full Windows Event logs for additional context\n5. Consider isolating the system if compromise is suspected",
+                "related_logs": [log.get('sha256', '') for log in failures if log.get('sha256')]
+            }
+            issues.append(issue)
+    
+    # Create issues for authentication failure patterns  
+    for agent, failures in auth_failures.items():
+        if len(failures) >= 10:  # 10 or more auth failures from same agent
+            issue = {
+                "severity": "Medium", 
+                "title": f"Multiple Authentication Failures on {agent}",
+                "summary": f"Detected {len(failures)} authentication failures on agent {agent}. This could indicate brute force attacks, account lockouts, or credential stuffing attempts.",
+                "recommendation": f"1. Review authentication failure details on {agent}\n2. Check for patterns in usernames, source IPs, and timing\n3. Verify legitimate user accounts are not being targeted\n4. Consider implementing additional authentication controls\n5. Monitor for successful logins following these failures",
+                "related_logs": [log.get('sha256', '') for log in failures if log.get('sha256')]
+            }
+            issues.append(issue)
+    
+    # Create issues for privilege escalations during suspicious periods
+    if privilege_elevations and (crypto_failures or len(auth_failures) > 0):
+        issue = {
+            "severity": "High",
+            "title": "Privilege Escalation During Suspicious Activity Period", 
+            "summary": f"Detected {len(privilege_elevations)} privilege escalation events occurring during a period with cryptographic failures or authentication issues. This correlation requires immediate investigation.",
+            "recommendation": "1. Verify all privilege escalations were authorized and legitimate\n2. Cross-reference timing with cryptographic failures and auth events\n3. Review admin account activities during this timeframe\n4. Check for lateral movement or unauthorized access attempts\n5. Validate system integrity and configuration",
+            "related_logs": [log.get('sha256', '') for log in privilege_elevations if log.get('sha256')]
+        }
+        issues.append(issue)
+    
+    return issues
+
+
 async def analyze_context_and_identify_issues(recent_logs: List[Dict[str, Any]]) -> None:
     """
     Perform AI analysis on recent logs and identify new security issues.
@@ -636,6 +706,12 @@ async def analyze_context_and_identify_issues(recent_logs: List[Dict[str, Any]])
         return
     try:
         logging.info(f"Starting AI analysis with {len(recent_logs)} new logs")
+        
+        # First, run rule-based detection to catch obvious patterns
+        state.set_app_status("Running pattern-based detection...")
+        pattern_issues = detect_pattern_based_issues(recent_logs)
+        logging.info(f"Pattern-based detection found {len(pattern_issues)} issues")
+        
         state.set_app_status("Summarizing recent logs...")
         recent_logs_subset = recent_logs[:200]
         recent_summary = await summarize_logs(recent_logs_subset, "recent")
@@ -679,9 +755,9 @@ async def analyze_context_and_identify_issues(recent_logs: List[Dict[str, Any]])
 CRITICAL INSTRUCTIONS:
 
 1. Your response must be EXACTLY this JSON structure with NO additional text, explanations, or formatting
-1. DO NOT create duplicate issues - check against existing issues first
-1. Focus on NEW, UNIQUE security threats not already identified
-1. ENSURE related_logs contains actual SHA256 hashes from the provided log data
+2. Check existing issues to avoid exact duplicates, but create new issues for different security events
+3. Focus on identifying ALL security threats that warrant investigation - be thorough, not conservative
+4. ENSURE related_logs contains actual SHA256 hashes from the provided log data
 
 {{
 \"overall_summary\": \"Brief summary of current security situation and new findings\",
@@ -708,14 +784,19 @@ Sample Recent Logs: {recent_logs_str[:10000]}
 
 **ANALYSIS REQUIREMENTS:**
 
-1. Create overall_summary describing the CURRENT security situation and any NEW developments
-1. Only add to identified_issues array if you find NEW, UNIQUE security incidents not covered by existing issues
-1. Use severity: Low, Medium, High, or Critical based on actual threat level
-1. Include specific SHA256 hashes in related_logs from the log data provided above
-1. If no NEW issues found (only existing ones), use empty identified_issues array: []
-1. Focus on ACTIONABLE threats that require immediate attention
-1. Avoid creating duplicate or similar issues to those already identified
-1. Ensure related_logs contains valid SHA256 hashes from the actual log data
+1. Create overall_summary describing the CURRENT security situation and any developments
+2. PROACTIVELY identify security issues that require attention - err on the side of detection rather than missing threats
+3. Create issues for patterns like:
+   - Multiple failures (cryptographic, authentication, audit) from same source
+   - Concentrated suspicious activity within short time windows  
+   - Privilege escalations or special logons during anomalous periods
+   - Repeated error patterns that could indicate attacks or system compromise
+   - Any Windows Event IDs 5061 (crypto failures), 4625 (failed logons), 4672 (special privileges)
+4. Use severity: Low, Medium, High, or Critical based on actual threat level
+5. Include specific SHA256 hashes in related_logs from the log data provided above
+6. Focus on ACTIONABLE threats and suspicious patterns that warrant investigation
+7. Better to create an issue for investigation than miss a potential security incident
+8. Ensure related_logs contains valid SHA256 hashes from the actual log data
 
 IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. Do not include any explanatory text, markdown formatting, or code blocks. Start your response with {{ and end with }}."""
         token_count = count_tokens_local(prompt, FULL_MODEL)
@@ -772,9 +853,15 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
         state.set_app_status("Processing results...")
         state.dashboard_data["summary"] = analysis_result.get("overall_summary", "Analysis complete.")
         new_issues: List[Dict[str, Any]] = []
+        
+        # Combine pattern-based issues with AI-detected issues
         identified_issues = analysis_result.get("identified_issues", [])
         if not isinstance(identified_issues, list):
             identified_issues = []
+        
+        # Add pattern-based issues to the identified issues list
+        identified_issues.extend(pattern_issues)
+        
         existing_signatures: set[str] = set()
         for existing_issue in state.dashboard_data["issues"]:
             existing_signatures.add(generate_issue_signature(existing_issue))
@@ -1253,6 +1340,10 @@ async def _perform_enhanced_analysis_with_entities(
 ) -> None:
     """Perform the main analysis with entity context."""
     
+    # First run pattern-based detection
+    pattern_issues = detect_pattern_based_issues(recent_logs)
+    logging.info(f"Enhanced analysis pattern detection found {len(pattern_issues)} issues")
+    
     # Prepare enhanced context
     recent_logs_str = prepare_full_log_context(recent_logs)
     existing_issues_context: List[Dict[str, Any]] = []
@@ -1387,6 +1478,9 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
     identified_issues = analysis_result.get("identified_issues", [])
     if not isinstance(identified_issues, list):
         identified_issues = []
+    
+    # Add pattern-based issues to enhanced analysis
+    identified_issues.extend(pattern_issues)
     
     existing_signatures: set[str] = set()
     for existing_issue in state.dashboard_data["issues"]:
