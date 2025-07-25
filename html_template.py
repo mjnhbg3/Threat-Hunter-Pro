@@ -857,7 +857,7 @@ HTML_CONTENT = r"""
     let chatHistory = [];
     let countdownInterval = null;
     let lastUpdateTime = null;
-    let processingInterval = 300; // Default 5 minutes
+    let processingInterval = 600; // Default 10 minutes
     let allIssues = []; // Store all issues for filtering
     let isGridView = true;
     let selectedRuleFilter = null;
@@ -900,11 +900,21 @@ HTML_CONTENT = r"""
         }
         
         const updateCountdown = () => {
-            if (!lastUpdateTime) return;
+            if (!lastUpdateTime) {
+                console.log('No lastUpdateTime set for countdown');
+                return;
+            }
             
             const now = Date.now();
             const nextScan = lastUpdateTime + (processingInterval * 1000);
             const timeLeft = Math.max(0, nextScan - now);
+            
+            console.log('Countdown debug:', {
+                lastUpdateTime: new Date(lastUpdateTime),
+                processingInterval,
+                nextScan: new Date(nextScan),
+                timeLeft: Math.floor(timeLeft / 1000) + 's'
+            });
             
             if (timeLeft === 0) {
                 document.getElementById('countdown-container').style.display = 'none';
@@ -1308,11 +1318,14 @@ HTML_CONTENT = r"""
         
         // Update processing interval and start countdown if idle/ready
         if (data.settings && data.settings.processing_interval) {
+            console.log('Updating processingInterval from', processingInterval, 'to', data.settings.processing_interval);
             processingInterval = data.settings.processing_interval;
         }
         
         if (data.last_run) {
-            lastUpdateTime = new Date(data.last_run).getTime();
+            const newLastUpdateTime = new Date(data.last_run).getTime();
+            console.log('Setting lastUpdateTime to', new Date(data.last_run), 'with processing interval', processingInterval);
+            lastUpdateTime = newLastUpdateTime;
             if (status === 'Ready' || status === 'Idle') {
                 startCountdownTimer();
             } else {

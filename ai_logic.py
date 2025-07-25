@@ -628,59 +628,63 @@ async def analyze_comprehensive_issues(logs: List[Dict[str, Any]]) -> Dict[str, 
     Use AI to comprehensively analyze logs for both security and operational issues.
     Returns categorized issues: {"security_issues": [...], "operational_issues": [...]}
     """
+    logging.info(f"analyze_comprehensive_issues called with {len(logs)} logs")
     if not logs:
+        logging.info("No logs provided to analyze_comprehensive_issues")
         return {"security_issues": [], "operational_issues": []}
     
     # Prepare log context for comprehensive analysis
     log_context = prepare_full_log_context(logs[:100])  # Analyze up to 100 recent logs
     
-    prompt = f"""You are an expert system administrator and security analyst. Analyze the provided logs and identify ANY issues that require attention, categorized into two types:
+    prompt = f"""You are a security and system analyst. Analyze these logs and identify issues in two categories:
 
-**SECURITY ISSUES**: Threats, attacks, unauthorized access, suspicious activities, compliance violations
-**OPERATIONAL ISSUES**: Performance problems, system errors, misconfigurations, resource issues, maintenance needs
+SECURITY ISSUES: Threats, attacks, unauthorized access, suspicious activities
+OPERATIONAL ISSUES: Performance problems, system errors, misconfigurations, resource issues
 
-Return EXACTLY this JSON structure with NO additional text:
+Return ONLY this exact JSON format:
 
 {{
 "security_issues": [
 {{
-"severity": "Critical|High|Medium|Low",
-"title": "Descriptive title of the security issue",
-"summary": "Detailed explanation of the security threat or concern",
-"recommendation": "Specific action steps to address this security issue",
-"related_logs": ["sha256_hash1", "sha256_hash2"]
+"severity": "High",
+"title": "Issue title here", 
+"summary": "What the issue is and why it matters",
+"recommendation": "What to do about it",
+"related_logs": ["hash1", "hash2"]
 }}
 ],
 "operational_issues": [
 {{
-"severity": "Critical|High|Medium|Low", 
-"title": "Descriptive title of the operational issue",
-"summary": "Detailed explanation of the operational problem or concern",
-"recommendation": "Specific action steps to address this operational issue",
-"related_logs": ["sha256_hash1", "sha256_hash2"]
+"severity": "Medium",
+"title": "Issue title here",
+"summary": "What the issue is and why it matters", 
+"recommendation": "What to do about it",
+"related_logs": ["hash1", "hash2"]
 }}
 ]
 }}
 
-**ANALYSIS GUIDELINES:**
-1. Be thorough - identify ALL patterns that warrant attention
-2. Look for concentrated failures, repeated errors, performance degradation
-3. Consider both immediate threats and longer-term operational health
-4. Include specific evidence from the logs in your analysis
-5. Use appropriate severity levels based on impact and urgency
-6. Ensure related_logs contains actual SHA256 hashes from the provided data
+Guidelines:
+- Be thorough in identifying issues
+- Look for error patterns, failures, unusual activities
+- Use severity: Critical, High, Medium, or Low
+- Include actual SHA256 hashes from logs in related_logs
+- If no issues found, use empty arrays: []
 
-**LOG DATA TO ANALYZE:**
-{log_context[:15000]}
+LOG DATA:
+{log_context[:10000]}
 
-IMPORTANT: Return ONLY the JSON object. Start with {{ and end with }}."""
+Return ONLY the JSON object starting with {{ and ending with }}."""
 
     try:
+        logging.info(f"Sending comprehensive analysis prompt to AI with {len(logs)} logs")
         raw_response = await call_gemini_api(prompt, is_json_output=True, model_name=FULL_MODEL)
+        logging.info(f"AI raw response (first 500 chars): {raw_response[:500]}")
         json_str = extract_json_from_string(raw_response)
         
         if not json_str:
-            logging.warning("Failed to extract JSON from comprehensive analysis")
+            logging.warning(f"Failed to extract JSON from comprehensive analysis. Raw response length: {len(raw_response)}")
+            logging.warning(f"Raw response content: {raw_response}")
             return {"security_issues": [], "operational_issues": []}
         
         result = json.loads(json_str)
@@ -724,6 +728,12 @@ async def analyze_context_and_identify_issues(recent_logs: List[Dict[str, Any]])
         comprehensive_results = await analyze_comprehensive_issues(recent_logs)
         all_detected_issues = comprehensive_results["security_issues"] + comprehensive_results["operational_issues"]
         logging.info(f"Comprehensive analysis found {len(comprehensive_results['security_issues'])} security issues and {len(comprehensive_results['operational_issues'])} operational issues")
+        
+        # Debug: Log the actual results for troubleshooting
+        if comprehensive_results['security_issues']:
+            logging.info(f"Security issues found: {[issue.get('title', 'No title') for issue in comprehensive_results['security_issues']]}")
+        if comprehensive_results['operational_issues']:
+            logging.info(f"Operational issues found: {[issue.get('title', 'No title') for issue in comprehensive_results['operational_issues']]}")
         
         state.set_app_status("Summarizing recent logs...")
         recent_logs_subset = recent_logs[:200]

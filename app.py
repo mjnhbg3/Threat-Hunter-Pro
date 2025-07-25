@@ -66,6 +66,13 @@ async def get_dashboard_ui(user: str = Depends(check_auth)) -> Response:
 async def get_dashboard_data_api(user: str = Depends(check_auth)) -> Any:
     """Return the current dashboard data including minimal settings."""
     state.dashboard_data["settings"] = {"processing_interval": state.settings.get("processing_interval")}
+    
+    # Debug: Log dashboard data being returned
+    logging.info(f"Dashboard API returning {len(state.dashboard_data.get('issues', []))} issues")
+    if state.dashboard_data.get('issues'):
+        for issue in state.dashboard_data['issues']:
+            logging.info(f"Issue: {issue.get('title', 'No title')} - Category: {issue.get('category', 'No category')}")
+    
     return state.dashboard_data
 
 
