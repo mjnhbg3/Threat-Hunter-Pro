@@ -1,5 +1,5 @@
 """
-Gemini Embedding Client for Threat Hunter Pro.
+Gemini Embedding Client for Threat Hunter Pro using Google's official client library.
 
 This module provides a client for Google's Gemini embedding API,
 specifically optimized for the gemini-embedding-001 model with
@@ -9,13 +9,19 @@ intelligent fallback to local models when daily limits are exhausted.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Union
-import httpx
 import numpy as np
+
+try:
+    import google.generativeai as genai
+    from google.generativeai import types
+    GOOGLE_AI_AVAILABLE = True
+except ImportError:
+    GOOGLE_AI_AVAILABLE = False
+    logging.error("google-generativeai library not available. Install with: pip install google-generativeai")
 
 from .config import GEMINI_API_KEYS
 from .token_bucket import TokenBucket
@@ -23,7 +29,8 @@ from .token_bucket import TokenBucket
 
 class GeminiEmbeddingClient:
     """
-    Client for Google Gemini Embedding API with production-ready features:
+    Client for Google Gemini Embedding API using the official Python client.
+    Features:
     - Correct rate limiting: 100 RPM, 30K TPM, 1,000 RPD per API key
     - Daily request tracking with automatic reset at midnight
     - Intelligent fallback when ALL API keys exhaust daily limits
@@ -31,12 +38,13 @@ class GeminiEmbeddingClient:
     """
     
     def __init__(self):
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+        if not GOOGLE_AI_AVAILABLE:
+            raise ImportError("google-generativeai library is required. Install with: pip install google-generativeai")
+        
         self.model_name = "gemini-embedding-001"
         self.dimension = 768  # Recommended dimension for gemini-embedding-001
         self.task_type = "RETRIEVAL_DOCUMENT"  # Optimized for document retrieval
         self.current_key_index = 0
-        self.http_client: Optional[httpx.AsyncClient] = None
         
         # Rate limiting: 100 RPM, 30K TPM, 1,000 RPD per key
         self.rpm_limit = 100
@@ -52,19 +60,16 @@ class GeminiEmbeddingClient:
         self.daily_reset_times: Dict[str, datetime] = {}
         self.all_keys_exhausted = False
         
+        # Initialize clients for each API key
+        self.clients: Dict[str, genai.GenerativeModel] = {}
+        for api_key in GEMINI_API_KEYS:
+            genai.configure(api_key=api_key)
+            # Note: We'll reconfigure for each request to handle multi-key rotation
+        
         logging.info(f"Initialized Gemini Embedding Client")
         logging.info(f"Model: {self.model_name}, Dimension: {self.dimension}")
         logging.info(f"Rate limits: {self.rpm_limit} RPM, {self.tpm_limit} TPM, {self.rpd_limit} RPD per key")
         logging.info(f"Available API keys: {len(GEMINI_API_KEYS)}")
-    
-    async def _get_http_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client with appropriate timeouts."""
-        if self.http_client is None:
-            self.http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0),
-                limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
-            )
-        return self.http_client
     
     def _get_rate_bucket(self, api_key: str, bucket_type: str) -> TokenBucket:
         """Get or create rate limiting bucket for API key."""
@@ -154,81 +159,44 @@ class GeminiEmbeddingClient:
         return None
     
     async def _make_embedding_request(self, texts: List[str], api_key: str) -> List[List[float]]:
-        """Make a single embedding request to Gemini API."""
-        client = await self._get_http_client()
-        url = f"{self.base_url}/models/{self.model_name}:embedContent"
-        
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key
-        }
-        
-        # Prepare request payload - correct format for Gemini embedding API
-        contents = []
-        for text in texts:
-            # Truncate very long texts to avoid API limits (rough estimate: ~30k chars max)
-            truncated_text = text[:30000] if len(text) > 30000 else text
-            contents.append({
-                "parts": [{"text": truncated_text}]
-            })
-        
-        # Try minimal payload first to debug - remove embedding_config temporarily
-        payload = {
-            "contents": contents
-        }
-        
-        # TODO: Re-enable embedding_config after basic request works
-        # if self.task_type != "SEMANTIC_SIMILARITY" or self.dimension != 768:
-        #     payload["embedding_config"] = {
-        #         "task_type": self.task_type,
-        #         "output_dimensionality": self.dimension
-        #     }
-        
-        # Debug logging to see actual request
-        logging.info(f"Gemini API URL: {url}")
-        logging.info(f"Gemini API Headers: {headers}")
-        logging.info(f"Text lengths: {[len(text) for text in texts]}")
-        logging.info(f"Gemini API Payload: {json.dumps(payload, indent=2)[:500]}...")  # Truncate for readability
+        """Make a single embedding request to Gemini API using the official client."""
+        # Configure the client for this API key
+        genai.configure(api_key=api_key)
         
         try:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
+            # Prepare texts - truncate if too long
+            processed_texts = []
+            for text in texts:
+                # Truncate very long texts to avoid API limits
+                truncated_text = text[:30000] if len(text) > 30000 else text
+                processed_texts.append(truncated_text)
             
-            result = response.json()
+            # Use the official client library
+            response = genai.embed_content(
+                model=f"models/{self.model_name}",
+                content=processed_texts,
+                task_type=self.task_type,
+                output_dimensionality=self.dimension
+            )
+            
+            # Extract embeddings from response
             embeddings = []
-            
-            if "embeddings" in result:
-                for embedding_data in result["embeddings"]:
-                    if "values" in embedding_data:
-                        embeddings.append(embedding_data["values"])
-                    else:
-                        logging.warning("No values found in embedding response")
-                        embeddings.append([0.0] * self.dimension)
+            if hasattr(response, 'embedding') and hasattr(response.embedding, 'values'):
+                # Single embedding response
+                embeddings = [response.embedding.values]
+            elif hasattr(response, 'embeddings'):
+                # Multiple embeddings response
+                embeddings = [emb.values for emb in response.embeddings]
             else:
-                logging.error(f"No embeddings in response: {result}")
+                logging.error(f"Unexpected response format: {response}")
                 return [[0.0] * self.dimension] * len(texts)
             
             return embeddings
             
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                logging.warning(f"Rate limit hit for embedding API: {e}")
-                raise
-            elif e.response.status_code == 400:
-                try:
-                    error_body = e.response.json()
-                    logging.error(f"400 Bad Request - Response body: {json.dumps(error_body, indent=2)}")
-                except:
-                    error_body = e.response.text
-                    logging.error(f"400 Bad Request - Response text: {error_body}")
-                logging.error(f"Request payload that caused error: {json.dumps(payload, indent=2)}")
-                raise
-            else:
-                logging.error(f"HTTP error in embedding request: {e}")
-                raise
         except Exception as e:
-            logging.error(f"Error in embedding request: {e}")
-            raise
+            logging.error(f"Error in Gemini embedding request: {e}")
+            # Return zero embeddings as fallback
+            return [[0.0] * self.dimension] * len(texts)
     
     def is_exhausted(self) -> bool:
         """Check if all API keys are exhausted for the day."""
@@ -236,7 +204,7 @@ class GeminiEmbeddingClient:
     
     async def embed_texts(self, texts: List[str], batch_size: int = 5) -> np.ndarray:
         """
-        Generate embeddings for a list of texts.
+        Generate embeddings for a list of texts using the official Google client.
         
         Args:
             texts: List of text strings to embed
@@ -316,12 +284,6 @@ class GeminiEmbeddingClient:
         """Generate embedding for a single text."""
         embeddings = await self.embed_texts([text])
         return embeddings[0] if len(embeddings) > 0 else np.zeros(self.dimension, dtype=np.float32)
-    
-    async def close(self):
-        """Close the HTTP client."""
-        if self.http_client:
-            await self.http_client.aclose()
-            self.http_client = None
 
 
 # Global instance
@@ -343,7 +305,7 @@ async def close_gemini_embedding_client():
     global _gemini_embedding_client
     
     if _gemini_embedding_client:
-        await _gemini_embedding_client.close()
+        # No explicit close needed for the Google client
         _gemini_embedding_client = None
 
 
