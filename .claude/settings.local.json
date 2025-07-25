@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(timeout:*)",
+      "Bash(set GEMINI_API_KEY=test_key)",
+      "Bash(set BASIC_AUTH_USER=admin)",
+      "Bash(set BASIC_AUTH_PASS=password)",
+      "Bash(curl:*)",
+      "Bash(del \"C:\\Users\\dkesten\\Downloads\\threat_hunter_refactored\\test_api.py\")",
+      "Bash(rm:*)",
+      "Bash(ls:*)",
+      "Bash(cp:*)",
+      "Bash(grep:*)",
+      "Bash(mkdir:*)",
+      "Bash(diff:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}
