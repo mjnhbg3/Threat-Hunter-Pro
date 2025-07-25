@@ -37,10 +37,10 @@ def background_worker() -> None:
     try:
         logging.info("Background worker starting...")
         state.set_app_status("Starting up...")
-        initialize_vector_db()
         # Create a dedicated event loop for asynchronous operations
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        loop.run_until_complete(initialize_vector_db())
         state.set_app_status("Loading dashboard data...")
         loop.run_until_complete(load_dashboard_data())
         state.set_app_status("Loading settings...")

@@ -19,15 +19,29 @@ import numpy as np
 import faiss
 from typing import List, Any, Dict
 
-from sentence_transformers import SentenceTransformer
-
 import state
 from config import (
     DB_DIR,
     VECTOR_DB_FILE,
     METADATA_DB_FILE,
     EMBEDDING_MODEL_NAME,
+    EMBEDDING_PROVIDER,
+    EMBEDDING_DIMENSION,
+    SENTENCE_TRANSFORMERS_MODEL,
 )
+
+# Conditional imports based on embedding provider
+if EMBEDDING_PROVIDER == "gemini":
+    from gemini_embeddings import get_gemini_embedding_client, close_gemini_embedding_client, is_gemini_exhausted
+    try:
+        from sentence_transformers import SentenceTransformer
+        SENTENCE_TRANSFORMERS_AVAILABLE = True
+    except ImportError:
+        logging.warning("SentenceTransformers not available - no fallback possible if Gemini API exhausted")
+        SENTENCE_TRANSFORMERS_AVAILABLE = False
+else:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
 from token_bucket import TokenBucket  # Imported to hint at rate limiting usage
 
 from persistence import save_dashboard_data  # Needed for clear_database
@@ -45,7 +59,7 @@ except ImportError:
     bm25s = None
 
 
-def initialize_vector_db() -> None:
+async def initialize_vector_db() -> None:
     """
     Ensure the vector database, metadata and embedding model are initialised.
     This function is idempotent and may be called multiple times. It
@@ -58,16 +72,41 @@ def initialize_vector_db() -> None:
 
     # Load the embedding model if not already loaded
     if state.embedding_model is None:
-        logging.info("Loading embedding model...")
+        logging.info(f"Loading embedding model using provider: {EMBEDDING_PROVIDER}...")
         try:
-            state.embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-            embedding_dim = state.embedding_model.get_sentence_embedding_dimension()
-            logging.info(f"Embedding model loaded. Dimension: {embedding_dim}")
+            if EMBEDDING_PROVIDER == "gemini":
+                # For Gemini, we store the client and dimension info
+                state.embedding_model = await get_gemini_embedding_client()
+                state.embedding_provider = "gemini"
+                embedding_dim = EMBEDDING_DIMENSION
+                logging.info(f"Gemini embedding model loaded. Model: {EMBEDDING_MODEL_NAME}, Dimension: {embedding_dim}")
+                
+                # Pre-load SentenceTransformers as fallback if available
+                if SENTENCE_TRANSFORMERS_AVAILABLE:
+                    try:
+                        state.fallback_embedding_model = SentenceTransformer(SENTENCE_TRANSFORMERS_MODEL)
+                        logging.info(f"SentenceTransformers fallback model loaded: {SENTENCE_TRANSFORMERS_MODEL}")
+                    except Exception as e:
+                        logging.warning(f"Failed to load SentenceTransformers fallback: {e}")
+                        state.fallback_embedding_model = None
+                else:
+                    state.fallback_embedding_model = None
+            else:
+                # For SentenceTransformers, load the model locally
+                state.embedding_model = SentenceTransformer(SENTENCE_TRANSFORMERS_MODEL)
+                state.embedding_provider = "sentence_transformers"
+                state.fallback_embedding_model = None
+                embedding_dim = state.embedding_model.get_sentence_embedding_dimension()
+                logging.info(f"SentenceTransformers model loaded. Model: {SENTENCE_TRANSFORMERS_MODEL}, Dimension: {embedding_dim}")
         except Exception as e:
             logging.error(f"Failed to load embedding model: {e}")
             raise
 
-    embedding_dim = state.embedding_model.get_sentence_embedding_dimension()
+    # Get embedding dimension based on current provider
+    if hasattr(state, 'embedding_provider') and state.embedding_provider == "gemini":
+        embedding_dim = EMBEDDING_DIMENSION
+    else:
+        embedding_dim = state.embedding_model.get_sentence_embedding_dimension()
     
     # NEW: Initialize NER for entity extraction
     try:
@@ -182,20 +221,68 @@ async def add_to_vector_db(log_entries: List[Dict[str, Any]]) -> None:
             logging.warning(f"Entity extraction failed for log {sha[:8]}: {e}")
             texts_for_embedding.append(base_embedding_text)
     
-    # Generate embeddings in smaller chunks for stability
+    # Generate embeddings with intelligent fallback
     embeddings_list = []
-    chunk_size = 64
-    for i in range(0, len(texts_for_embedding), chunk_size):
-        chunk = texts_for_embedding[i:i+chunk_size]
-        state.set_app_status(f"Vectorizing chunk {i//chunk_size + 1}/{(len(texts_for_embedding)//chunk_size) + 1}")
-        try:
-            chunk_embeddings = await asyncio.to_thread(
-                state.embedding_model.encode, chunk, convert_to_numpy=True, batch_size=32
-            )
-            embeddings_list.append(chunk_embeddings)
-        except Exception as e:
-            logging.error(f"Failed to generate embeddings for chunk {i}: {e}")
-            continue
+    current_provider = getattr(state, 'embedding_provider', EMBEDDING_PROVIDER)
+    
+    if current_provider == "gemini":
+        # Use Gemini embedding API with fallback
+        chunk_size = 5  # Smaller chunks for strict rate limits
+        gemini_exhausted = False
+        
+        for i in range(0, len(texts_for_embedding), chunk_size):
+            chunk = texts_for_embedding[i:i+chunk_size]
+            
+            # Check if Gemini is exhausted and switch to fallback
+            if is_gemini_exhausted() and not gemini_exhausted:
+                logging.warning("Gemini API keys exhausted - switching to SentenceTransformers fallback")
+                gemini_exhausted = True
+                if state.fallback_embedding_model is not None:
+                    state.embedding_provider = "sentence_transformers_fallback"
+                    logging.info("Successfully switched to SentenceTransformers fallback")
+                else:
+                    logging.error("No fallback model available - continuing with zero embeddings")
+            
+            if not gemini_exhausted:
+                # Try Gemini first
+                state.set_app_status(f"Vectorizing chunk {i//chunk_size + 1}/{(len(texts_for_embedding)//chunk_size) + 1} via Gemini API")
+                try:
+                    chunk_embeddings = await state.embedding_model.embed_texts(chunk, batch_size=chunk_size)
+                    if len(chunk_embeddings) > 0:
+                        embeddings_list.append(chunk_embeddings)
+                        continue
+                except Exception as e:
+                    logging.error(f"Failed to generate Gemini embeddings for chunk {i}: {e}")
+                    # Fall through to fallback
+            
+            # Use fallback if Gemini failed or exhausted
+            if state.fallback_embedding_model is not None:
+                state.set_app_status(f"Vectorizing chunk {i//chunk_size + 1}/{(len(texts_for_embedding)//chunk_size) + 1} via fallback model")
+                try:
+                    chunk_embeddings = await asyncio.to_thread(
+                        state.fallback_embedding_model.encode, chunk, convert_to_numpy=True, batch_size=16
+                    )
+                    embeddings_list.append(chunk_embeddings)
+                except Exception as e:
+                    logging.error(f"Failed to generate fallback embeddings for chunk {i}: {e}")
+                    continue
+            else:
+                logging.warning(f"No embedding method available for chunk {i} - skipping")
+                continue
+    else:
+        # Use SentenceTransformers (local model)
+        chunk_size = 64
+        for i in range(0, len(texts_for_embedding), chunk_size):
+            chunk = texts_for_embedding[i:i+chunk_size]
+            state.set_app_status(f"Vectorizing chunk {i//chunk_size + 1}/{(len(texts_for_embedding)//chunk_size) + 1} via local model")
+            try:
+                chunk_embeddings = await asyncio.to_thread(
+                    state.embedding_model.encode, chunk, convert_to_numpy=True, batch_size=32
+                )
+                embeddings_list.append(chunk_embeddings)
+            except Exception as e:
+                logging.error(f"Failed to generate local embeddings for chunk {i}: {e}")
+                continue
     
     if not embeddings_list:
         logging.error("Failed to generate any embeddings")
@@ -272,9 +359,36 @@ async def search_vector_db(query_text: str, k: int = 10, keywords: List[str] = N
         # Step 1: Semantic search (fetch 2x candidates if using hybrid)
         search_k = k * 2 if use_hybrid else k
         
-        query_embedding = await asyncio.to_thread(
-            state.embedding_model.encode, [query_text], convert_to_numpy=True
-        )
+        # Generate query embedding using current provider with fallback
+        current_provider = getattr(state, 'embedding_provider', EMBEDDING_PROVIDER)
+        
+        if current_provider == "gemini":
+            # Check if Gemini is exhausted
+            if is_gemini_exhausted():
+                logging.warning("Gemini exhausted during search - using fallback model")
+                if state.fallback_embedding_model is not None:
+                    query_embedding = await asyncio.to_thread(
+                        state.fallback_embedding_model.encode, [query_text], convert_to_numpy=True
+                    )
+                else:
+                    logging.error("No fallback model available for search")
+                    return []
+            else:
+                try:
+                    query_embedding = await state.embedding_model.embed_texts([query_text])
+                except Exception as e:
+                    logging.error(f"Gemini embedding failed during search: {e}")
+                    if state.fallback_embedding_model is not None:
+                        logging.info("Falling back to SentenceTransformers for search")
+                        query_embedding = await asyncio.to_thread(
+                            state.fallback_embedding_model.encode, [query_text], convert_to_numpy=True
+                        )
+                    else:
+                        return []
+        else:
+            query_embedding = await asyncio.to_thread(
+                state.embedding_model.encode, [query_text], convert_to_numpy=True
+            )
         async with state.vector_lock:
             distances, indices = state.vector_db.search(query_embedding, search_k)
         
@@ -387,7 +501,14 @@ async def search_vector_db(query_text: str, k: int = 10, keywords: List[str] = N
 async def clear_database() -> None:
     """Reset the FAISS index and metadata to an empty state."""
     async with state.vector_lock:
-        embedding_dim = state.embedding_model.get_sentence_embedding_dimension()
+        # Get embedding dimension based on current provider
+        current_provider = getattr(state, 'embedding_provider', EMBEDDING_PROVIDER)
+        if current_provider == "gemini" or current_provider == "sentence_transformers_fallback":
+            # Use Gemini dimension even for fallback to maintain compatibility
+            embedding_dim = EMBEDDING_DIMENSION
+        else:
+            embedding_dim = state.embedding_model.get_sentence_embedding_dimension()
+        
         state.vector_db = faiss.IndexFlatL2(embedding_dim)
         state.vector_db = faiss.IndexIDMap(state.vector_db)
         state.metadata_db = {}
@@ -404,6 +525,20 @@ async def clear_database() -> None:
         state.dashboard_data["rule_distribution"] = {}
         save_vector_db()
         await save_dashboard_data()
+
+
+async def cleanup_vector_db() -> None:
+    """Clean up resources used by the vector database."""
+    if EMBEDDING_PROVIDER == "gemini":
+        # Close Gemini embedding client
+        try:
+            from gemini_embeddings import close_gemini_embedding_client
+            await close_gemini_embedding_client()
+            logging.info("Gemini embedding client closed")
+        except Exception as e:
+            logging.warning(f"Error closing Gemini embedding client: {e}")
+    
+    logging.info("Vector database cleanup complete")
         from .config import LOG_POSITION_FILE  # Avoid circular import at module top
         if os.path.exists(LOG_POSITION_FILE):
             os.remove(LOG_POSITION_FILE)

@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sentence-transformers
+faiss-cpu
+google-generativeai
+httpx
+numpy
+python-multipart
+aiofiles
+# NEW: Added for hybrid search and NER functionality
+spacy>=3.7.0
+bm25s>=0.2.0
+scikit-learn>=1.3.0
+# For downloading spaCy model, run: python -m spacy download en_core_web_sm
