@@ -132,7 +132,7 @@ class GeminiEmbeddingClient:
             rpm_bucket = self._get_rate_bucket(current_key, "rpm")
             tpm_bucket = self._get_rate_bucket(current_key, "tpm")
             
-            if rpm_bucket.consume(1) and tpm_bucket.consume(estimated_tokens):
+            if await rpm_bucket.consume(1) and await tpm_bucket.consume(estimated_tokens):
                 self._increment_daily_count(current_key)
                 return current_key
         
@@ -142,9 +142,9 @@ class GeminiEmbeddingClient:
                 continue
                 
             rpm_bucket = self._get_rate_bucket(key, "rpm")
-            tmp_bucket = self._get_rate_bucket(key, "tpm")
+            tpm_bucket = self._get_rate_bucket(key, "tpm")
             
-            if rpm_bucket.consume(1) and tpm_bucket.consume(estimated_tokens):
+            if await rpm_bucket.consume(1) and await tpm_bucket.consume(estimated_tokens):
                 self.current_key_index = i
                 self._increment_daily_count(key)
                 daily_count = self.daily_request_counts[key]
@@ -171,7 +171,6 @@ class GeminiEmbeddingClient:
             })
         
         payload = {
-            "model": f"models/{self.model_name}",
             "contents": contents,
             "embedding_config": {
                 "task_type": self.task_type,
