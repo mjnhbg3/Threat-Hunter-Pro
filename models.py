@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 
 class Issue(BaseModel):
-    """Representation of a security issue detected by the analysis."""
+    """Representation of an issue detected by the analysis."""
 
     id: str
     timestamp: str
@@ -20,6 +20,7 @@ class Issue(BaseModel):
     summary: str
     recommendation: str
     related_logs: List[str]
+    category: str = "security"  # "security" or "operational"
 
 
 class DashboardData(BaseModel):

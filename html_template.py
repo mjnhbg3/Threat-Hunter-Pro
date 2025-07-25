@@ -417,22 +417,41 @@ HTML_CONTENT = r"""
         
         <!-- Left Column: Issues -->
         <div class="xl:col-span-2 space-y-8">
-            <!-- Issues Section -->
+            <!-- Security Issues Section -->
             <div class="glass-card p-6">
                 <div class="flex items-center justify-between mb-6 security-issues-header p-2 -m-2" id="security-issues-header">
                     <h2 class="text-xl font-semibold flex items-center gap-2">
-                        <span class="w-6 h-6 rounded bg-red-500/20 flex items-center justify-center text-red-400">⚠️</span>
-                        Top Security Issues
-                        <span id="issue-count" class="px-2 py-1 bg-red-500/20 text-red-300 rounded-lg text-sm font-medium">0</span>
+                        <span class="w-6 h-6 rounded bg-red-500/20 flex items-center justify-center text-red-400">🔒</span>
+                        Security Issues
+                        <span id="security-issue-count" class="px-2 py-1 bg-red-500/20 text-red-300 rounded-lg text-sm font-medium">0</span>
                     </h2>
                     <div class="flex items-center gap-2">
-                        <div id="issues-loading" class="loading-spinner hidden text-blue-400"></div>
-                        <span class="text-xs text-gray-500">Click to view all</span>
+                        <div id="security-issues-loading" class="loading-spinner hidden text-blue-400"></div>
+                        <span class="text-xs text-gray-500">Threats & Security</span>
                     </div>
                 </div>
                 
-                <div id="issues-container" class="space-y-4 max-h-[700px] overflow-y-auto pr-2 custom-scrollbar">
-                    <!-- Top 10 AI-prioritized issues will be injected here -->
+                <div id="security-issues-container" class="space-y-4 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
+                    <!-- Security issues will be injected here -->
+                </div>
+            </div>
+            
+            <!-- Operational Issues Section -->
+            <div class="glass-card p-6">
+                <div class="flex items-center justify-between mb-6 operational-issues-header p-2 -m-2" id="operational-issues-header">
+                    <h2 class="text-xl font-semibold flex items-center gap-2">
+                        <span class="w-6 h-6 rounded bg-yellow-500/20 flex items-center justify-center text-yellow-400">⚙️</span>
+                        Operational Issues
+                        <span id="operational-issue-count" class="px-2 py-1 bg-yellow-500/20 text-yellow-300 rounded-lg text-sm font-medium">0</span>
+                    </h2>
+                    <div class="flex items-center gap-2">
+                        <div id="operational-issues-loading" class="loading-spinner hidden text-blue-400"></div>
+                        <span class="text-xs text-gray-500">Performance & Health</span>
+                    </div>
+                </div>
+                
+                <div id="operational-issues-container" class="space-y-4 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
+                    <!-- Operational issues will be injected here -->
                 </div>
             </div>
             
@@ -653,7 +672,7 @@ HTML_CONTENT = r"""
 <div id="full-issues-modal" class="modal-backdrop">
     <div class="modal-content" style="max-width: 95vw; width: 1400px;">
         <div class="flex justify-between items-center mb-6">
-            <h2 class="text-2xl font-bold">All Security Issues</h2>
+            <h2 id="full-issues-modal-title" class="text-2xl font-bold">All Issues</h2>
             <button id="close-full-issues-modal-btn" class="text-gray-400 hover:text-white text-2xl">×</button>
         </div>
         
@@ -739,15 +758,21 @@ HTML_CONTENT = r"""
         max-height: 400px !important;
     }
     
-    /* Clickable security issues header */
-    .security-issues-header {
+    /* Clickable issues headers */
+    .security-issues-header, .operational-issues-header {
         cursor: pointer;
         transition: all 0.2s ease;
     }
     
     .security-issues-header:hover {
         transform: translateY(-1px);
-        background: rgba(59, 130, 246, 0.1);
+        background: rgba(239, 68, 68, 0.1);
+        border-radius: 0.5rem;
+    }
+    
+    .operational-issues-header:hover {
+        transform: translateY(-1px);
+        background: rgba(245, 158, 11, 0.1);
         border-radius: 0.5rem;
     }
     
@@ -1303,13 +1328,17 @@ HTML_CONTENT = r"""
         updateStatWithAnimation('new-logs', data.stats.new_logs);
         updateStatWithAnimation('anomalies', data.stats.anomalies);
         
-        // Sort issues by timestamp (most recent first) and show first 10 in widget
-        const sortedIssues = [...allIssues].sort((a, b) => 
+        // Separate issues by category
+        const securityIssues = allIssues.filter(issue => issue.category === 'security').sort((a, b) => 
             new Date(b.timestamp) - new Date(a.timestamp)
         );
-        const displayIssues = sortedIssues.slice(0, 10);
+        const operationalIssues = allIssues.filter(issue => issue.category === 'operational').sort((a, b) => 
+            new Date(b.timestamp) - new Date(a.timestamp)
+        );
         
-        updateIssuesDisplay(displayIssues, false); // false = no filtering controls in main widget
+        // Update both issue displays
+        updateSecurityIssuesDisplay(securityIssues.slice(0, 10));
+        updateOperationalIssuesDisplay(operationalIssues.slice(0, 10));
         
         // Update charts
         updateCharts(data);
@@ -1352,6 +1381,12 @@ HTML_CONTENT = r"""
         }
         
         console.log(`Displaying ${issues.length} issues in main widget`);
+        
+        // Update issue count
+        const issueCountElement = document.getElementById('issue-count');
+        if (issueCountElement) {
+            issueCountElement.textContent = issues.length;
+        }
         
         issues.forEach((issue, index) => {
             try {
@@ -1451,6 +1486,159 @@ HTML_CONTENT = r"""
         if (countElement) {
             countElement.textContent = allIssues.length;
         }
+    }
+
+    function updateSecurityIssuesDisplay(issues) {
+        const container = document.getElementById('security-issues-container');
+        const countElement = document.getElementById('security-issue-count');
+        
+        if (!container) {
+            console.error('Security issues container not found');
+            return;
+        }
+        
+        container.innerHTML = '';
+        countElement.textContent = issues.length;
+        
+        if (!issues || issues.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-500/20 flex items-center justify-center">
+                        <span class="text-xl">🔒</span>
+                    </div>
+                    <p class="text-gray-400">No security issues found</p>
+                    <p class="text-gray-500 text-sm mt-1">Systems appear secure</p>
+                </div>
+            `;
+            return;
+        }
+        
+        issues.forEach((issue, index) => {
+            container.appendChild(createIssueElement(issue, index));
+        });
+    }
+    
+    function updateOperationalIssuesDisplay(issues) {
+        const container = document.getElementById('operational-issues-container');
+        const countElement = document.getElementById('operational-issue-count');
+        
+        if (!container) {
+            console.error('Operational issues container not found');
+            return;
+        }
+        
+        container.innerHTML = '';
+        countElement.textContent = issues.length;
+        
+        if (!issues || issues.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-500/20 flex items-center justify-center">
+                        <span class="text-xl">⚙️</span>
+                    </div>
+                    <p class="text-gray-400">No operational issues found</p>
+                    <p class="text-gray-500 text-sm mt-1">Systems running smoothly</p>
+                </div>
+            `;
+            return;
+        }
+        
+        issues.forEach((issue, index) => {
+            container.appendChild(createIssueElement(issue, index));
+        });
+    }
+    
+    function createIssueElement(issue, index) {
+        const issueEl = document.createElement('div');
+        issueEl.className = `glass-card p-4 severity-${issue.severity || 'Low'}`;
+        issueEl.style.animationDelay = `${index * 0.1}s`;
+        
+        const severityIcons = {
+            'Critical': '🚨',
+            'High': '⚠️',
+            'Medium': '🔶',
+            'Low': 'ℹ️'
+        };
+        
+        const severityColors = {
+            'Critical': 'text-red-400 bg-red-500/20',
+            'High': 'text-orange-400 bg-orange-500/20',
+            'Medium': 'text-yellow-400 bg-yellow-500/20',
+            'Low': 'text-green-400 bg-green-500/20'
+        };
+        
+        const categoryIcons = {
+            'security': '🔒',
+            'operational': '⚙️'
+        };
+        
+        // Format related logs
+        const relatedLogsHtml = issue.related_logs && issue.related_logs.length > 0 
+            ? issue.related_logs.map((logId, idx) => {
+                const actualLogId = typeof logId === 'string' ? logId : (logId.id || logId.sha256 || String(logId));
+                return `<button class="log-button" data-log-id="${actualLogId}" title="Click to view log details">
+                    Log ${idx + 1}: ${actualLogId.substring(0, 8)}...
+                </button>`;
+              }).join('')
+            : '<span class="text-gray-500 text-sm">No related logs available</span>';
+        
+        const severity = issue.severity || 'Low';
+        const title = escapeHtml(issue.title || 'Untitled Issue');
+        const summary = issue.summary || 'No summary available';
+        const recommendation = issue.recommendation || 'No recommendations available';
+        const category = issue.category || 'security';
+        
+        issueEl.innerHTML = `
+            <div class="issue-header">
+                <div class="flex items-start justify-between">
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl">${categoryIcons[category] || '🔒'}</span>
+                        <div>
+                            <h3 class="font-semibold text-lg text-gray-100 leading-tight">${title}</h3>
+                            <span class="inline-flex items-center px-2 py-1 rounded-lg text-xs font-medium ${severityColors[severity]}">
+                                ${severityIcons[severity]} ${severity}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <details class="mt-4">
+                <summary class="cursor-pointer text-blue-400 hover:text-blue-300 font-medium">
+                    View Details & Actions
+                </summary>
+                <div class="mt-4 space-y-4">
+                    <div>
+                        <h4 class="font-medium text-gray-300 mb-2">Summary</h4>
+                        <p class="text-gray-400 text-sm leading-relaxed">${summary}</p>
+                    </div>
+                    <div>
+                        <h4 class="font-medium text-gray-300 mb-2">Recommendations</h4>
+                        <p class="text-gray-400 text-sm leading-relaxed whitespace-pre-line">${recommendation}</p>
+                    </div>
+                    <div>
+                        <h4 class="font-medium text-gray-300 mb-2">Related Logs</h4>
+                        <div class="space-y-2">
+                            ${relatedLogsHtml}
+                        </div>
+                    </div>
+                </div>
+            </details>
+            
+            <div class="issue-actions mt-4">
+                <button class="action-btn ignore-btn" data-issue-id="${issue.id || ''}">
+                    🗑️ Ignore
+                </button>
+                <button class="action-btn chat-btn" data-issue-id="${issue.id || ''}" data-issue-title="${title}">
+                    💬 Chat
+                </button>
+                <button class="action-btn script-btn" data-issue-id="${issue.id || ''}" data-issue-title="${title}">
+                    🔧 Fix Script
+                </button>
+            </div>
+        `;
+        
+        return issueEl;
     }
 
     function updateCharts(data) {
@@ -1750,10 +1938,13 @@ HTML_CONTENT = r"""
         }
     }
 
-    function openFullIssuesModal(issues) {
+    function openFullIssuesModal(issues, modalTitle = "All Issues") {
         const modal = document.getElementById('full-issues-modal');
         const container = document.getElementById('full-issues-container');
+        const titleElement = document.getElementById('full-issues-modal-title');
+        
         allIssues = issues; // Store for filtering
+        titleElement.textContent = modalTitle;
         
         displayModalIssues(issues);
         modal.style.display = 'flex';
@@ -2010,7 +2201,15 @@ HTML_CONTENT = r"""
     // Security issues header click handler
     document.getElementById('security-issues-header').addEventListener('click', async () => {
         console.log('Security issues header clicked');
-        
+        await showIssuesModal('security');
+    });
+    
+    document.getElementById('operational-issues-header').addEventListener('click', async () => {
+        console.log('Operational issues header clicked');
+        await showIssuesModal('operational');
+    });
+    
+    async function showIssuesModal(category) {
         try {
             // Use existing issues data if available, otherwise fetch fresh data
             let issuesToShow = allIssues;
@@ -2027,14 +2226,18 @@ HTML_CONTENT = r"""
                 }
             }
             
-            console.log('Opening full issues modal with', issuesToShow.length, 'issues');
-            openFullIssuesModal(issuesToShow);
+            // Filter issues by category
+            const filteredIssues = issuesToShow.filter(issue => issue.category === category);
+            const categoryLabel = category === 'security' ? 'Security' : 'Operational';
+            
+            console.log(`Opening ${categoryLabel} issues modal with`, filteredIssues.length, 'issues');
+            openFullIssuesModal(filteredIssues, `${categoryLabel} Issues`);
             
         } catch (error) {
             console.error('Failed to open full issues view:', error);
             showToast('Failed to load issues view. Please try again.', 'error');
         }
-    });
+    }
 
     // Chat input handlers
     document.getElementById('query-btn').addEventListener('click', handleQuery);

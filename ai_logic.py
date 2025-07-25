@@ -623,74 +623,86 @@ Output ONLY the combined comprehensive summary text.
 # Issue analysis
 # -----------------------------------------------------------------------------
 
-def detect_pattern_based_issues(logs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def analyze_comprehensive_issues(logs: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Detect obvious security patterns that should always be flagged as issues.
-    Returns a list of pre-identified issues for rule-based detection.
+    Use AI to comprehensively analyze logs for both security and operational issues.
+    Returns categorized issues: {"security_issues": [...], "operational_issues": [...]}
     """
-    issues = []
+    if not logs:
+        return {"security_issues": [], "operational_issues": []}
     
-    # Group logs by agent and event type for pattern detection
-    from collections import defaultdict
+    # Prepare log context for comprehensive analysis
+    log_context = prepare_full_log_context(logs[:100])  # Analyze up to 100 recent logs
     
-    # Track cryptographic failures (Event ID 5061)
-    crypto_failures = defaultdict(list)
-    auth_failures = defaultdict(list)
-    privilege_elevations = []
-    
-    for log in logs:
-        agent_name = log.get('agent', {}).get('name', 'unknown')
-        rule_id = log.get('rule', {}).get('id', '')
-        data = log.get('data', {})
+    prompt = f"""You are an expert system administrator and security analyst. Analyze the provided logs and identify ANY issues that require attention, categorized into two types:
+
+**SECURITY ISSUES**: Threats, attacks, unauthorized access, suspicious activities, compliance violations
+**OPERATIONAL ISSUES**: Performance problems, system errors, misconfigurations, resource issues, maintenance needs
+
+Return EXACTLY this JSON structure with NO additional text:
+
+{{
+"security_issues": [
+{{
+"severity": "Critical|High|Medium|Low",
+"title": "Descriptive title of the security issue",
+"summary": "Detailed explanation of the security threat or concern",
+"recommendation": "Specific action steps to address this security issue",
+"related_logs": ["sha256_hash1", "sha256_hash2"]
+}}
+],
+"operational_issues": [
+{{
+"severity": "Critical|High|Medium|Low", 
+"title": "Descriptive title of the operational issue",
+"summary": "Detailed explanation of the operational problem or concern",
+"recommendation": "Specific action steps to address this operational issue",
+"related_logs": ["sha256_hash1", "sha256_hash2"]
+}}
+]
+}}
+
+**ANALYSIS GUIDELINES:**
+1. Be thorough - identify ALL patterns that warrant attention
+2. Look for concentrated failures, repeated errors, performance degradation
+3. Consider both immediate threats and longer-term operational health
+4. Include specific evidence from the logs in your analysis
+5. Use appropriate severity levels based on impact and urgency
+6. Ensure related_logs contains actual SHA256 hashes from the provided data
+
+**LOG DATA TO ANALYZE:**
+{log_context[:15000]}
+
+IMPORTANT: Return ONLY the JSON object. Start with {{ and end with }}."""
+
+    try:
+        raw_response = await call_gemini_api(prompt, is_json_output=True, model_name=FULL_MODEL)
+        json_str = extract_json_from_string(raw_response)
         
-        # Windows Event ID 5061 - Cryptographic operation failed
-        if 'win.eventdata.eventID' in data and data.get('win.eventdata.eventID') == '5061':
-            crypto_failures[agent_name].append(log)
+        if not json_str:
+            logging.warning("Failed to extract JSON from comprehensive analysis")
+            return {"security_issues": [], "operational_issues": []}
         
-        # Windows Event ID 4625 - Failed logon
-        elif 'win.eventdata.eventID' in data and data.get('win.eventdata.eventID') == '4625':
-            auth_failures[agent_name].append(log)
-            
-        # Windows Event ID 4672 - Special privileges assigned to new logon
-        elif 'win.eventdata.eventID' in data and data.get('win.eventdata.eventID') == '4672':
-            privilege_elevations.append(log)
-    
-    # Create issues for concentrated cryptographic failures
-    for agent, failures in crypto_failures.items():
-        if len(failures) >= 5:  # 5 or more crypto failures from same agent
-            issue = {
-                "severity": "High",
-                "title": f"Multiple Cryptographic Operation Failures on {agent}",
-                "summary": f"Detected {len(failures)} cryptographic operation failures on agent {agent}. This could indicate system compromise, malware activity, or critical system misconfiguration requiring immediate investigation.",
-                "recommendation": f"1. Immediately investigate agent {agent} for signs of compromise\n2. Check running processes and services for anomalous cryptographic operations\n3. Review recent software installations or updates\n4. Examine full Windows Event logs for additional context\n5. Consider isolating the system if compromise is suspected",
-                "related_logs": [log.get('sha256', '') for log in failures if log.get('sha256')]
-            }
-            issues.append(issue)
-    
-    # Create issues for authentication failure patterns  
-    for agent, failures in auth_failures.items():
-        if len(failures) >= 10:  # 10 or more auth failures from same agent
-            issue = {
-                "severity": "Medium", 
-                "title": f"Multiple Authentication Failures on {agent}",
-                "summary": f"Detected {len(failures)} authentication failures on agent {agent}. This could indicate brute force attacks, account lockouts, or credential stuffing attempts.",
-                "recommendation": f"1. Review authentication failure details on {agent}\n2. Check for patterns in usernames, source IPs, and timing\n3. Verify legitimate user accounts are not being targeted\n4. Consider implementing additional authentication controls\n5. Monitor for successful logins following these failures",
-                "related_logs": [log.get('sha256', '') for log in failures if log.get('sha256')]
-            }
-            issues.append(issue)
-    
-    # Create issues for privilege escalations during suspicious periods
-    if privilege_elevations and (crypto_failures or len(auth_failures) > 0):
-        issue = {
-            "severity": "High",
-            "title": "Privilege Escalation During Suspicious Activity Period", 
-            "summary": f"Detected {len(privilege_elevations)} privilege escalation events occurring during a period with cryptographic failures or authentication issues. This correlation requires immediate investigation.",
-            "recommendation": "1. Verify all privilege escalations were authorized and legitimate\n2. Cross-reference timing with cryptographic failures and auth events\n3. Review admin account activities during this timeframe\n4. Check for lateral movement or unauthorized access attempts\n5. Validate system integrity and configuration",
-            "related_logs": [log.get('sha256', '') for log in privilege_elevations if log.get('sha256')]
-        }
-        issues.append(issue)
-    
-    return issues
+        result = json.loads(json_str)
+        
+        # Validate structure
+        if not isinstance(result, dict):
+            return {"security_issues": [], "operational_issues": []}
+        
+        security_issues = result.get("security_issues", [])
+        operational_issues = result.get("operational_issues", [])
+        
+        if not isinstance(security_issues, list):
+            security_issues = []
+        if not isinstance(operational_issues, list):
+            operational_issues = []
+        
+        logging.info(f"Comprehensive analysis found {len(security_issues)} security issues and {len(operational_issues)} operational issues")
+        return {"security_issues": security_issues, "operational_issues": operational_issues}
+        
+    except Exception as e:
+        logging.error(f"Error in comprehensive issue analysis: {e}")
+        return {"security_issues": [], "operational_issues": []}
 
 
 async def analyze_context_and_identify_issues(recent_logs: List[Dict[str, Any]]) -> None:
@@ -707,10 +719,11 @@ async def analyze_context_and_identify_issues(recent_logs: List[Dict[str, Any]])
     try:
         logging.info(f"Starting AI analysis with {len(recent_logs)} new logs")
         
-        # First, run rule-based detection to catch obvious patterns
-        state.set_app_status("Running pattern-based detection...")
-        pattern_issues = detect_pattern_based_issues(recent_logs)
-        logging.info(f"Pattern-based detection found {len(pattern_issues)} issues")
+        # First, run comprehensive AI analysis to detect both security and operational issues
+        state.set_app_status("Running comprehensive issue analysis...")
+        comprehensive_results = await analyze_comprehensive_issues(recent_logs)
+        all_detected_issues = comprehensive_results["security_issues"] + comprehensive_results["operational_issues"]
+        logging.info(f"Comprehensive analysis found {len(comprehensive_results['security_issues'])} security issues and {len(comprehensive_results['operational_issues'])} operational issues")
         
         state.set_app_status("Summarizing recent logs...")
         recent_logs_subset = recent_logs[:200]
@@ -859,8 +872,13 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
         if not isinstance(identified_issues, list):
             identified_issues = []
         
-        # Add pattern-based issues to the identified issues list
-        identified_issues.extend(pattern_issues)
+        # Add comprehensive analysis issues with proper categorization
+        for issue in comprehensive_results["security_issues"]:
+            issue["category"] = "security"
+            identified_issues.append(issue)
+        for issue in comprehensive_results["operational_issues"]:
+            issue["category"] = "operational"
+            identified_issues.append(issue)
         
         existing_signatures: set[str] = set()
         for existing_issue in state.dashboard_data["issues"]:
@@ -870,6 +888,10 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
                 required_fields = ["severity", "title", "summary", "recommendation"]
                 if not all(field in issue_data for field in required_fields):
                     continue
+                
+                # Ensure category field exists, default to security for backward compatibility
+                if "category" not in issue_data:
+                    issue_data["category"] = "security"
                 issue_signature = generate_issue_signature(issue_data)
                 if issue_signature in existing_signatures:
                     continue
@@ -1340,9 +1362,10 @@ async def _perform_enhanced_analysis_with_entities(
 ) -> None:
     """Perform the main analysis with entity context."""
     
-    # First run pattern-based detection
-    pattern_issues = detect_pattern_based_issues(recent_logs)
-    logging.info(f"Enhanced analysis pattern detection found {len(pattern_issues)} issues")
+    # First run comprehensive analysis for both security and operational issues
+    comprehensive_results = await analyze_comprehensive_issues(recent_logs)
+    all_detected_issues = comprehensive_results["security_issues"] + comprehensive_results["operational_issues"]
+    logging.info(f"Enhanced analysis found {len(comprehensive_results['security_issues'])} security issues and {len(comprehensive_results['operational_issues'])} operational issues")
     
     # Prepare enhanced context
     recent_logs_str = prepare_full_log_context(recent_logs)
@@ -1479,8 +1502,13 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
     if not isinstance(identified_issues, list):
         identified_issues = []
     
-    # Add pattern-based issues to enhanced analysis
-    identified_issues.extend(pattern_issues)
+    # Add comprehensive analysis issues with proper categorization
+    for issue in comprehensive_results["security_issues"]:
+        issue["category"] = "security"
+        identified_issues.append(issue)
+    for issue in comprehensive_results["operational_issues"]:
+        issue["category"] = "operational"
+        identified_issues.append(issue)
     
     existing_signatures: set[str] = set()
     for existing_issue in state.dashboard_data["issues"]:
@@ -1491,6 +1519,10 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
             required_fields = ["severity", "title", "summary", "recommendation"]
             if not all(field in issue_data for field in required_fields):
                 continue
+            
+            # Ensure category field exists, default to security for backward compatibility
+            if "category" not in issue_data:
+                issue_data["category"] = "security"
             
             issue_signature = generate_issue_signature(issue_data)
             if issue_signature in existing_signatures:
