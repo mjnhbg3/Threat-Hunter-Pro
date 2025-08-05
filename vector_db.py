@@ -106,6 +106,26 @@ def initialize_vector_db() -> None:
     logging.info("Vector database initialization complete.")
 
 
+async def _recreate_faiss_index(embedding_dim: int) -> None:
+    """Recreate FAISS index when corrupted or dimension mismatch occurs."""
+    logging.warning(f"Recreating FAISS index with dimension {embedding_dim}")
+    
+    # Create new index
+    state.vector_db = faiss.IndexFlatL2(embedding_dim)
+    state.vector_db = faiss.IndexIDMap(state.vector_db)
+    
+    # Clear metadata to start fresh
+    state.metadata_db.clear()
+    
+    # Clear BM25 corpus if it exists
+    if hasattr(state, 'bm25_corpus'):
+        state.bm25_corpus.clear()
+    if hasattr(state, 'bm25_index'):
+        state.bm25_index = None
+    
+    logging.info(f"FAISS index recreated with dimension {embedding_dim}")
+
+
 def save_vector_db() -> None:
     """Persist the FAISS index and metadata to disk."""
     if state.vector_db is not None:
@@ -207,7 +227,47 @@ async def add_to_vector_db(log_entries: List[Dict[str, Any]]) -> None:
     state.set_app_status("Adding to vector database...")
     async with state.vector_lock:
         try:
-            state.vector_db.add_with_ids(embeddings, np.array(faiss_ids))
+            # Debug information
+            try:
+                index_d = state.vector_db.d if hasattr(state.vector_db, 'd') else state.vector_db.index.d
+                logging.info(f"FAISS index info: ntotal={state.vector_db.ntotal}, d={index_d}")
+            except Exception as e:
+                logging.warning(f"Could not get FAISS index info: {e}")
+                index_d = embeddings.shape[1]  # Use embedding dimension as fallback
+            
+            logging.info(f"Embeddings shape: {embeddings.shape}")
+            logging.info(f"FAISS IDs count: {len(faiss_ids)}")
+            
+            # Validate embeddings and IDs
+            if embeddings.shape[0] != len(faiss_ids):
+                raise ValueError(f"Embeddings count ({embeddings.shape[0]}) doesn't match IDs count ({len(faiss_ids)})")
+            
+            # Check if FAISS index dimension matches (with fallback for IndexIDMap)
+            try:
+                if embeddings.shape[1] != index_d:
+                    raise ValueError(f"Embedding dimension ({embeddings.shape[1]}) doesn't match FAISS index dimension ({index_d})")
+            except:
+                logging.warning("Could not validate dimensions, proceeding with caution")
+            
+            # Convert IDs to numpy array with proper dtype
+            faiss_ids_array = np.array(faiss_ids, dtype=np.int64)
+            logging.info(f"Adding {len(faiss_ids_array)} vectors to FAISS index")
+            
+            # Check for duplicate IDs that might already exist
+            try:
+                state.vector_db.add_with_ids(embeddings, faiss_ids_array)
+                logging.info(f"Successfully added vectors. New total: {state.vector_db.ntotal}")
+            except Exception as add_error:
+                logging.error(f"FAISS add_with_ids failed: {add_error}")
+                # Try to recreate the index if it's corrupted
+                if "dimension" in str(add_error).lower() or "id" in str(add_error).lower():
+                    logging.warning("Attempting to recreate FAISS index due to dimension/ID mismatch")
+                    await _recreate_faiss_index(embeddings.shape[1])
+                    state.vector_db.add_with_ids(embeddings, faiss_ids_array)
+                    logging.info(f"Successfully added vectors after index recreation. New total: {state.vector_db.ntotal}")
+                else:
+                    raise add_error
+            
             # Update metadata
             for sha, log in unique_logs.items():
                 state.metadata_db[sha] = log
