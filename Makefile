@@ -387,6 +387,21 @@ clean-data: ## Clean application data (WARNING: destructive)
 		echo "❌ Cancelled"; \
 	fi
 
+reset-db: ## Reset vector database and start fresh
+	@echo "🗑️  Resetting vector database..."
+	@python reset_database.py
+
+reset-settings: ## Reset only settings, keep vector data
+	@echo "⚙️  Resetting settings only..."
+	@python reset_database.py --settings-only
+
+reset-db-confirm: ## Reset database without confirmation (CI/automation)
+	@echo "🗑️  Resetting vector database (auto-confirmed)..."
+	@python reset_database.py --confirm
+
+db-info: ## Show database information
+	@python reset_database.py --info
+
 update: ## Update all dependencies
 	@echo "Updating dependencies..."
 	@poetry update
@@ -475,5 +490,5 @@ info: ## Show environment information
 .PHONY: deploy-dev deploy-prod deploy-staging up down restart
 .PHONY: health-check logs logs-app status metrics
 .PHONY: backup restore migrate shell db-shell jupyter
-.PHONY: clean clean-all clean-data update ci-setup ci-test ci-build ci-deploy
+.PHONY: clean clean-all clean-data reset-db reset-settings reset-db-confirm db-info update ci-setup ci-test ci-build ci-deploy
 .PHONY: docs docs-serve release pre-release info
