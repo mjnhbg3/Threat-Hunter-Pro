@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
       "WebFetch(domain:ai.google.dev)",
@@ -20,7 +21,11 @@
       "Bash(git add:*)",
       "Bash(gh repo create:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(mkdir:*)",
+      "Bash(pip install:*)",
+      "Bash(touch:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   }

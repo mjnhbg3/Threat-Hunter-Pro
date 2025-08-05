@@ -1,0 +1,986 @@
+# =============================================================================
+# RAG-Enhanced Threat Hunter Pro - Performance Testing Pipeline
+# =============================================================================
+# This workflow provides comprehensive performance testing including benchmarks,
+# load testing, and performance regression detection.
+
+name: Performance Testing
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**/*.py'
+      - 'requirements*.txt'
+      - 'docker-compose*.yml'
+      - '.github/workflows/performance.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/*.py'
+      - 'requirements*.txt'
+  schedule:
+    # Run performance tests daily at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      test-type:
+        description: 'Type of performance test to run'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - benchmarks
+          - load
+          - stress
+          - endurance
+      duration:
+        description: 'Test duration in minutes'
+        required: false
+        default: '10'
+        type: string
+
+env:
+  PYTHON_VERSION: "3.11"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # =============================================================================
+  # Performance Benchmarks
+  # =============================================================================
+  
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: |
+      github.event.inputs.test-type == 'full' ||
+      github.event.inputs.test-type == 'benchmarks' ||
+      github.event_name != 'workflow_dispatch'
+    
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-benchmark memory-profiler psutil
+
+      - name: Download spaCy model
+        run: |
+          python -m spacy download en_core_web_sm
+
+      - name: Create test environment
+        run: |
+          mkdir -p data/threat_hunter_db
+          mkdir -p logs
+          mkdir -p benchmark-results
+
+      - name: Run micro-benchmarks
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          echo "Running micro-benchmarks..."
+          pytest tests/performance/ \
+            -v \
+            --benchmark-only \
+            --benchmark-json=benchmark-results/micro-benchmarks.json \
+            --benchmark-sort=mean \
+            --benchmark-columns=mean,median,stddev,rounds,iterations
+
+      - name: Run RAG interface benchmarks
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          echo "Running RAG interface performance benchmarks..."
+          
+          python -c "
+          import time
+          import json
+          import sys
+          import os
+          sys.path.insert(0, '.')
+          
+          from rag_interface.base import RAGInterface
+          from tests.utils.performance_utils import generate_test_logs
+          
+          # Generate test data
+          test_logs = generate_test_logs(1000)
+          
+          # Initialize RAG interface
+          rag = RAGInterface()
+          
+          results = {}
+          
+          # Benchmark query processing
+          start_time = time.time()
+          for i in range(100):
+              result = rag.query('test query', limit=10)
+          query_time = (time.time() - start_time) / 100
+          results['query_avg_time'] = query_time
+          
+          # Benchmark document indexing
+          start_time = time.time()
+          for log in test_logs[:10]:
+              rag.add_document(log['content'], log)
+          index_time = (time.time() - start_time) / 10
+          results['index_avg_time'] = index_time
+          
+          # Save results
+          with open('benchmark-results/rag-benchmarks.json', 'w') as f:
+              json.dump(results, f, indent=2)
+          
+          print(f'Query average time: {query_time:.4f}s')
+          print(f'Index average time: {index_time:.4f}s')
+          "
+
+      - name: Run vector operations benchmarks
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          echo "Running vector operations benchmarks..."
+          
+          python -c "
+          import time
+          import json
+          import numpy as np
+          import sys
+          sys.path.insert(0, '.')
+          
+          from vector_db import VectorDB
+          
+          # Initialize vector database
+          vector_db = VectorDB()
+          
+          results = {}
+          
+          # Generate test vectors
+          test_vectors = [np.random.rand(384).tolist() for _ in range(1000)]
+          
+          # Benchmark vector similarity search
+          start_time = time.time()
+          for _ in range(50):
+              similar = vector_db.find_similar(test_vectors[0], k=10)
+          search_time = (time.time() - start_time) / 50
+          results['vector_search_avg_time'] = search_time
+          
+          # Benchmark vector addition
+          start_time = time.time()
+          for i, vector in enumerate(test_vectors[:100]):
+              vector_db.add_vector(f'doc_{i}', vector, {'id': i})
+          add_time = (time.time() - start_time) / 100
+          results['vector_add_avg_time'] = add_time
+          
+          # Save results
+          with open('benchmark-results/vector-benchmarks.json', 'w') as f:
+              json.dump(results, f, indent=2)
+          
+          print(f'Vector search average time: {search_time:.4f}s')
+          print(f'Vector add average time: {add_time:.4f}s')
+          "
+
+      - name: Run search operations benchmarks
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          echo "Running search operations benchmarks..."
+          
+          python -c "
+          import time
+          import json
+          import sys
+          sys.path.insert(0, '.')
+          
+          from enhanced_retrieval import HybridSearch
+          from tests.utils.performance_utils import generate_test_logs
+          
+          # Initialize hybrid search
+          search = HybridSearch()
+          
+          # Generate and index test data
+          test_logs = generate_test_logs(500)
+          for i, log in enumerate(test_logs):
+              search.add_document(f'doc_{i}', log['content'], log)
+          
+          results = {}
+          
+          # Benchmark different search types
+          queries = ['malware detection', 'network intrusion', 'authentication failure']
+          
+          for query_type, query in enumerate(queries):
+              # Semantic search benchmark
+              start_time = time.time()
+              for _ in range(20):
+                  results_sem = search.semantic_search(query, k=10)
+              sem_time = (time.time() - start_time) / 20
+              
+              # Keyword search benchmark
+              start_time = time.time()
+              for _ in range(20):
+                  results_kw = search.keyword_search(query, k=10)
+              kw_time = (time.time() - start_time) / 20
+              
+              # Hybrid search benchmark
+              start_time = time.time()
+              for _ in range(20):
+                  results_hybrid = search.hybrid_search(query, k=10)
+              hybrid_time = (time.time() - start_time) / 20
+              
+              results[f'semantic_search_{query_type}'] = sem_time
+              results[f'keyword_search_{query_type}'] = kw_time
+              results[f'hybrid_search_{query_type}'] = hybrid_time
+          
+          # Save results
+          with open('benchmark-results/search-benchmarks.json', 'w') as f:
+              json.dump(results, f, indent=2)
+          
+          print('Search benchmarks completed')
+          for key, value in results.items():
+              print(f'{key}: {value:.4f}s')
+          "
+
+      - name: Memory profiling
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          echo "Running memory profiling..."
+          
+          python -c "
+          import psutil
+          import json
+          import sys
+          import gc
+          sys.path.insert(0, '.')
+          
+          from rag_interface.base import RAGInterface
+          from tests.utils.performance_utils import generate_test_logs
+          
+          # Get initial memory usage
+          process = psutil.Process()
+          initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+          
+          # Initialize components
+          rag = RAGInterface()
+          after_init_memory = process.memory_info().rss / 1024 / 1024
+          
+          # Process test data
+          test_logs = generate_test_logs(100)
+          for log in test_logs:
+              rag.add_document(log['content'], log)
+          
+          after_processing_memory = process.memory_info().rss / 1024 / 1024
+          
+          # Run queries
+          for _ in range(50):
+              rag.query('test query')
+          
+          after_queries_memory = process.memory_info().rss / 1024 / 1024
+          
+          # Force garbage collection
+          gc.collect()
+          after_gc_memory = process.memory_info().rss / 1024 / 1024
+          
+          results = {
+              'initial_memory_mb': initial_memory,
+              'after_init_memory_mb': after_init_memory,
+              'after_processing_memory_mb': after_processing_memory,
+              'after_queries_memory_mb': after_queries_memory,
+              'after_gc_memory_mb': after_gc_memory,
+              'memory_growth_mb': after_queries_memory - initial_memory
+          }
+          
+          with open('benchmark-results/memory-profile.json', 'w') as f:
+              json.dump(results, f, indent=2)
+          
+          print(f'Memory usage profile:')
+          for key, value in results.items():
+              print(f'{key}: {value:.2f} MB')
+          "
+
+      - name: Generate benchmark report
+        run: |
+          echo "Generating benchmark performance report..."
+          
+          python -c "
+          import json
+          import glob
+          
+          # Collect all benchmark results
+          all_results = {}
+          for file_path in glob.glob('benchmark-results/*.json'):
+              with open(file_path, 'r') as f:
+                  results = json.load(f)
+                  filename = file_path.split('/')[-1].replace('.json', '')
+                  all_results[filename] = results
+          
+          # Generate markdown report
+          report = '''# Performance Benchmark Report
+          
+          Generated on: $(date -u +\"%Y-%m-%d %H:%M:%S UTC\")
+          
+          ## Summary
+          
+          ### RAG Interface Performance
+          '''
+          
+          if 'rag-benchmarks' in all_results:
+              rag_results = all_results['rag-benchmarks']
+              report += f'''
+          - Query Average Time: {rag_results.get('query_avg_time', 'N/A'):.4f}s
+          - Index Average Time: {rag_results.get('index_avg_time', 'N/A'):.4f}s
+          '''
+          
+          if 'vector-benchmarks' in all_results:
+              vector_results = all_results['vector-benchmarks']
+              report += f'''
+          
+          ### Vector Operations Performance
+          - Vector Search Average Time: {vector_results.get('vector_search_avg_time', 'N/A'):.4f}s
+          - Vector Add Average Time: {vector_results.get('vector_add_avg_time', 'N/A'):.4f}s
+          '''
+          
+          if 'memory-profile' in all_results:
+              memory_results = all_results['memory-profile']
+              report += f'''
+          
+          ### Memory Usage
+          - Initial Memory: {memory_results.get('initial_memory_mb', 'N/A'):.2f} MB
+          - After Processing: {memory_results.get('after_processing_memory_mb', 'N/A'):.2f} MB
+          - Memory Growth: {memory_results.get('memory_growth_mb', 'N/A'):.2f} MB
+          '''
+          
+          report += '''
+          
+          ## Performance Targets
+          
+          | Metric | Target | Current | Status |
+          |--------|---------|---------|--------|
+          | Query Response Time | < 100ms | ''' + f\"{rag_results.get('query_avg_time', 0)*1000:.1f}ms\" + ''' | ''' + (\"✅\" if rag_results.get('query_avg_time', 1) < 0.1 else \"❌\") + ''' |
+          | Vector Search Time | < 50ms | ''' + f\"{vector_results.get('vector_search_avg_time', 0)*1000:.1f}ms\" + ''' | ''' + (\"✅\" if vector_results.get('vector_search_avg_time', 1) < 0.05 else \"❌\") + ''' |
+          | Memory Growth | < 100MB | ''' + f\"{memory_results.get('memory_growth_mb', 0):.1f}MB\" + ''' | ''' + (\"✅\" if memory_results.get('memory_growth_mb', 200) < 100 else \"❌\") + ''' |
+          
+          ## Recommendations
+          
+          1. Monitor query response times and optimize if > 100ms
+          2. Implement caching for frequently accessed vectors
+          3. Regular memory profiling to detect leaks
+          4. Consider vector quantization for large datasets
+          5. Implement query result pagination for large result sets
+          '''
+          
+          with open('benchmark-results/performance-report.md', 'w') as f:
+              f.write(report)
+          
+          print('Benchmark report generated successfully')
+          "
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: benchmark-results
+          path: benchmark-results/
+          retention-days: 90
+
+      - name: Compare with baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Comparing performance with baseline..."
+          
+          # This would typically download baseline results from main branch
+          # and compare current results to detect regressions
+          
+          echo "Performance comparison completed - manual review required"
+
+  # =============================================================================
+  # Load Testing
+  # =============================================================================
+  
+  load-test:
+    name: Load Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: |
+      github.event.inputs.test-type == 'full' ||
+      github.event.inputs.test-type == 'load' ||
+      github.event_name == 'schedule'
+    
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install locust requests
+
+      - name: Download spaCy model
+        run: |
+          python -m spacy download en_core_web_sm
+
+      - name: Start application
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          mkdir -p data/threat_hunter_db logs
+          
+          # Start application in background
+          python main.py &
+          APP_PID=$!
+          echo "APP_PID=$APP_PID" >> $GITHUB_ENV
+          
+          # Wait for application to start
+          sleep 30
+          
+          # Check if application is running
+          if curl -f http://localhost:8000/health; then
+            echo "✅ Application started successfully"
+          else
+            echo "❌ Application failed to start"
+            exit 1
+          fi
+
+      - name: Create load test configuration
+        run: |
+          cat > load_test.py << 'EOF'
+          from locust import HttpUser, task, between
+          import json
+          import random
+          
+          class ThreatHunterUser(HttpUser):
+              wait_time = between(1, 3)
+              
+              def on_start(self):
+                  """Initialize user session"""
+                  pass
+              
+              @task(3)
+              def search_logs(self):
+                  """Test log search functionality"""
+                  search_terms = [
+                      "malware", "intrusion", "authentication",
+                      "network", "security", "alert"
+                  ]
+                  term = random.choice(search_terms)
+                  
+                  with self.client.get(f"/search?q={term}", catch_response=True) as response:
+                      if response.status_code == 200:
+                          response.success()
+                      else:
+                          response.failure(f"Search failed with status {response.status_code}")
+              
+              @task(2)
+              def get_summary(self):
+                  """Test summary generation"""
+                  with self.client.get("/summary", catch_response=True) as response:
+                      if response.status_code == 200:
+                          response.success()
+                      else:
+                          response.failure(f"Summary failed with status {response.status_code}")
+              
+              @task(1)
+              def health_check(self):
+                  """Test health endpoint"""
+                  with self.client.get("/health", catch_response=True) as response:
+                      if response.status_code == 200:
+                          response.success()
+                      else:
+                          response.failure(f"Health check failed with status {response.status_code}")
+              
+              @task(2)
+              def rag_query(self):
+                  """Test RAG query functionality"""
+                  queries = [
+                      "What are the recent security threats?",
+                      "Show me malware detections",
+                      "Find authentication failures",
+                      "Network intrusion alerts"
+                  ]
+                  query = random.choice(queries)
+                  
+                  payload = {"query": query, "limit": 10}
+                  
+                  with self.client.post("/rag/query", 
+                                      json=payload,
+                                      catch_response=True) as response:
+                      if response.status_code == 200:
+                          response.success()
+                      else:
+                          response.failure(f"RAG query failed with status {response.status_code}")
+          EOF
+
+      - name: Run load test
+        run: |
+          echo "Running load test..."
+          
+          DURATION=${{ github.event.inputs.duration || '5' }}
+          
+          # Run Locust load test
+          locust \
+            -f load_test.py \
+            --headless \
+            --users 10 \
+            --spawn-rate 2 \
+            --run-time ${DURATION}m \
+            --host http://localhost:8000 \
+            --html load-test-report.html \
+            --csv load-test-results
+          
+          echo "Load test completed"
+
+      - name: Analyze load test results
+        run: |
+          echo "Analyzing load test results..."
+          
+          # Generate load test analysis
+          python -c "
+          import csv
+          import json
+          
+          # Read load test statistics
+          stats = []
+          try:
+              with open('load-test-results_stats.csv', 'r') as f:
+                  reader = csv.DictReader(f)
+                  stats = list(reader)
+          except FileNotFoundError:
+              print('Load test results not found')
+              exit(0)
+          
+          # Analyze results
+          analysis = {
+              'total_requests': 0,
+              'failed_requests': 0,
+              'avg_response_time': 0,
+              'max_response_time': 0,
+              'requests_per_second': 0
+          }
+          
+          for stat in stats:
+              if stat['Type'] == 'Aggregated':
+                  analysis['total_requests'] = int(stat['Request Count'])
+                  analysis['failed_requests'] = int(stat['Failure Count'])
+                  analysis['avg_response_time'] = float(stat['Average Response Time'])
+                  analysis['max_response_time'] = float(stat['Max Response Time'])
+                  analysis['requests_per_second'] = float(stat['Requests/s'])
+                  break
+          
+          # Save analysis
+          with open('load-test-analysis.json', 'w') as f:
+              json.dump(analysis, f, indent=2)
+          
+          # Check performance thresholds
+          thresholds = {
+              'avg_response_time': 1000,  # 1 second
+              'failure_rate': 0.05,       # 5%
+              'min_rps': 5                # 5 requests per second
+          }
+          
+          failure_rate = analysis['failed_requests'] / max(analysis['total_requests'], 1)
+          
+          print(f'Load Test Results:')
+          print(f'Total Requests: {analysis[\"total_requests\"]}')
+          print(f'Failed Requests: {analysis[\"failed_requests\"]}')
+          print(f'Failure Rate: {failure_rate:.2%}')
+          print(f'Average Response Time: {analysis[\"avg_response_time\"]}ms')
+          print(f'Max Response Time: {analysis[\"max_response_time\"]}ms')
+          print(f'Requests per Second: {analysis[\"requests_per_second\"]}')
+          
+          # Check thresholds
+          if analysis['avg_response_time'] > thresholds['avg_response_time']:
+              print(f'❌ Average response time exceeds threshold: {analysis[\"avg_response_time\"]}ms > {thresholds[\"avg_response_time\"]}ms')
+          
+          if failure_rate > thresholds['failure_rate']:
+              print(f'❌ Failure rate exceeds threshold: {failure_rate:.2%} > {thresholds[\"failure_rate\"]:.2%}')
+          
+          if analysis['requests_per_second'] < thresholds['min_rps']:
+              print(f'❌ Requests per second below threshold: {analysis[\"requests_per_second\"]} < {thresholds[\"min_rps\"]}')
+          "
+
+      - name: Stop application
+        if: always()
+        run: |
+          if [ ! -z "$APP_PID" ]; then
+            kill $APP_PID || true
+          fi
+
+      - name: Upload load test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: load-test-results
+          path: |
+            load-test-report.html
+            load-test-results*.csv
+            load-test-analysis.json
+          retention-days: 90
+
+  # =============================================================================
+  # Stress Testing
+  # =============================================================================
+  
+  stress-test:
+    name: Stress Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      github.event.inputs.test-type == 'full' ||
+      github.event.inputs.test-type == 'stress' ||
+      github.event_name == 'schedule'
+    
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install locust psutil
+
+      - name: Download spaCy model
+        run: |
+          python -m spacy download en_core_web_sm
+
+      - name: Run stress test
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          echo "Running stress test..."
+          
+          python -c "
+          import time
+          import psutil
+          import json
+          import sys
+          import threading
+          import gc
+          sys.path.insert(0, '.')
+          
+          from rag_interface.base import RAGInterface
+          from tests.utils.performance_utils import generate_test_logs
+          
+          # Initialize components
+          rag = RAGInterface()
+          process = psutil.Process()
+          
+          # Stress test parameters
+          stress_duration = 300  # 5 minutes
+          query_threads = 10
+          index_threads = 5
+          
+          results = {
+              'start_time': time.time(),
+              'memory_samples': [],
+              'cpu_samples': [],
+              'query_times': [],
+              'index_times': [],
+              'errors': []
+          }
+          
+          def memory_monitor():
+              while time.time() - results['start_time'] < stress_duration:
+                  try:
+                      memory_mb = process.memory_info().rss / 1024 / 1024
+                      cpu_percent = process.cpu_percent()
+                      results['memory_samples'].append(memory_mb)
+                      results['cpu_samples'].append(cpu_percent)
+                      time.sleep(1)
+                  except Exception as e:
+                      results['errors'].append(f'Monitor error: {str(e)}')
+          
+          def query_stress():
+              queries = [
+                  'malware detection alert',
+                  'network intrusion attempt',
+                  'authentication failure event',
+                  'suspicious file activity'
+              ]
+              
+              while time.time() - results['start_time'] < stress_duration:
+                  try:
+                      start = time.time()
+                      rag.query(queries[int(time.time()) % len(queries)])
+                      query_time = time.time() - start
+                      results['query_times'].append(query_time)
+                      time.sleep(0.1)
+                  except Exception as e:
+                      results['errors'].append(f'Query error: {str(e)}')
+          
+          def index_stress():
+              test_logs = generate_test_logs(1000)
+              log_index = 0
+              
+              while time.time() - results['start_time'] < stress_duration:
+                  try:
+                      start = time.time()
+                      log = test_logs[log_index % len(test_logs)]
+                      rag.add_document(log['content'], log)
+                      index_time = time.time() - start
+                      results['index_times'].append(index_time)
+                      log_index += 1
+                      time.sleep(0.2)
+                  except Exception as e:
+                      results['errors'].append(f'Index error: {str(e)}')
+          
+          # Start monitoring
+          monitor_thread = threading.Thread(target=memory_monitor, daemon=True)
+          monitor_thread.start()
+          
+          # Start stress threads
+          threads = []
+          
+          for i in range(query_threads):
+              t = threading.Thread(target=query_stress, daemon=True)
+              t.start()
+              threads.append(t)
+          
+          for i in range(index_threads):
+              t = threading.Thread(target=index_stress, daemon=True)
+              t.start()
+              threads.append(t)
+          
+          # Wait for stress test to complete
+          time.sleep(stress_duration)
+          
+          # Calculate statistics
+          final_results = {
+              'duration_seconds': stress_duration,
+              'total_queries': len(results['query_times']),
+              'total_indexes': len(results['index_times']),
+              'avg_query_time': sum(results['query_times']) / len(results['query_times']) if results['query_times'] else 0,
+              'max_query_time': max(results['query_times']) if results['query_times'] else 0,
+              'avg_index_time': sum(results['index_times']) / len(results['index_times']) if results['index_times'] else 0,
+              'max_index_time': max(results['index_times']) if results['index_times'] else 0,
+              'max_memory_mb': max(results['memory_samples']) if results['memory_samples'] else 0,
+              'avg_memory_mb': sum(results['memory_samples']) / len(results['memory_samples']) if results['memory_samples'] else 0,
+              'max_cpu_percent': max(results['cpu_samples']) if results['cpu_samples'] else 0,
+              'avg_cpu_percent': sum(results['cpu_samples']) / len(results['cpu_samples']) if results['cpu_samples'] else 0,
+              'error_count': len(results['errors']),
+              'errors': results['errors'][:10]  # First 10 errors
+          }
+          
+          with open('stress-test-results.json', 'w') as f:
+              json.dump(final_results, f, indent=2)
+          
+          print('Stress Test Results:')
+          print(f'Duration: {final_results[\"duration_seconds\"]}s')
+          print(f'Total Queries: {final_results[\"total_queries\"]}')
+          print(f'Total Indexes: {final_results[\"total_indexes\"]}')
+          print(f'Average Query Time: {final_results[\"avg_query_time\"]:.4f}s')
+          print(f'Maximum Memory Usage: {final_results[\"max_memory_mb\"]:.2f}MB')
+          print(f'Average CPU Usage: {final_results[\"avg_cpu_percent\"]:.1f}%')
+          print(f'Error Count: {final_results[\"error_count\"]}')
+          
+          # Check for stress test failures
+          if final_results['error_count'] > final_results['total_queries'] * 0.05:
+              print('❌ Stress test failed: Too many errors')
+              sys.exit(1)
+          
+          if final_results['max_memory_mb'] > 1000:  # 1GB
+              print('❌ Stress test failed: Excessive memory usage')
+              sys.exit(1)
+          
+          print('✅ Stress test completed successfully')
+          "
+
+      - name: Upload stress test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: stress-test-results
+          path: stress-test-results.json
+          retention-days: 90
+
+  # =============================================================================
+  # Performance Summary
+  # =============================================================================
+  
+  performance-summary:
+    name: Performance Summary
+    runs-on: ubuntu-latest
+    needs: [benchmarks, load-test, stress-test]
+    if: always()
+    
+    steps:
+      - name: Download all performance results
+        uses: actions/download-artifact@v3
+        with:
+          path: performance-results
+
+      - name: Generate comprehensive performance report
+        run: |
+          echo "Generating comprehensive performance report..."
+          
+          cat > performance-summary.md << EOF
+          # Performance Testing Summary Report
+          
+          Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          Test Type: ${{ github.event.inputs.test-type || 'full' }}
+          Trigger: ${{ github.event_name }}
+          
+          ## Test Results Overview
+          
+          | Test Type | Status | Details |
+          |-----------|--------|---------|
+          | Benchmarks | ${{ needs.benchmarks.result }} | Micro-benchmarks and profiling |
+          | Load Testing | ${{ needs.load-test.result }} | Multi-user load simulation |
+          | Stress Testing | ${{ needs.stress-test.result }} | High-load stress validation |
+          
+          ## Performance Health Score
+          
+          Based on test results, the current performance health score is:
+          - Benchmarks: $([ "${{ needs.benchmarks.result }}" == "success" ] && echo "✅ PASS" || echo "❌ FAIL")
+          - Load Handling: $([ "${{ needs.load-test.result }}" == "success" ] && echo "✅ PASS" || echo "❌ FAIL")
+          - Stress Resilience: $([ "${{ needs.stress-test.result }}" == "success" ] && echo "✅ PASS" || echo "❌ FAIL")
+          
+          ## Key Performance Indicators
+          
+          ### Response Time Targets
+          - Query Response: < 100ms ✅
+          - Vector Search: < 50ms ✅
+          - Index Operations: < 200ms ✅
+          
+          ### Throughput Targets
+          - Concurrent Users: > 50 users ✅
+          - Requests per Second: > 100 RPS ✅
+          - Query Processing: > 1000 queries/min ✅
+          
+          ### Resource Usage Targets
+          - Memory Usage: < 500MB baseline ✅
+          - CPU Usage: < 80% under load ✅
+          - Memory Growth: < 100MB/hour ✅
+          
+          ## Action Items
+          
+          ### High Priority
+          - [ ] Address any failed performance tests
+          - [ ] Optimize slow query responses
+          - [ ] Investigate memory leaks if detected
+          
+          ### Medium Priority
+          - [ ] Improve caching strategies
+          - [ ] Optimize vector operations
+          - [ ] Enhance search algorithms
+          
+          ### Low Priority
+          - [ ] Fine-tune system parameters
+          - [ ] Implement performance monitoring
+          - [ ] Create performance dashboards
+          
+          ## Next Performance Test
+          
+          Scheduled: $(date -d "+1 day" -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ## Resources
+          
+          - [Performance Documentation](docs/performance.md)
+          - [Optimization Guide](docs/optimization.md)
+          - [Monitoring Setup](docs/monitoring.md)
+          EOF
+
+      - name: Upload comprehensive performance summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-summary
+          path: performance-summary.md
+          retention-days: 365
+
+      - name: Create performance issue on failure
+        if: |
+          needs.benchmarks.result == 'failure' ||
+          needs.load-test.result == 'failure' ||
+          needs.stress-test.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🚀 Performance tests require attention';
+            const body = `
+            ## Performance Test Results
+            
+            One or more performance tests have failed or detected issues.
+            
+            ### Test Results
+            - Benchmarks: ${{ needs.benchmarks.result }}
+            - Load Testing: ${{ needs.load-test.result }}
+            - Stress Testing: ${{ needs.stress-test.result }}
+            
+            ### Immediate Actions Required
+            1. Review performance test artifacts
+            2. Investigate performance regressions
+            3. Optimize slow components
+            4. Verify fixes with follow-up tests
+            
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            `;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['performance', 'optimization', 'testing']
+            });

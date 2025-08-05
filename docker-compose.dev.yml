@@ -1,0 +1,254 @@
+# =============================================================================
+# RAG-Enhanced Threat Hunter Pro - Development Overrides
+# =============================================================================
+# This file provides development-friendly overrides for the main docker-compose.yml
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Development Overrides for Core Services
+  # =============================================================================
+
+  threat-hunter-app:
+    build:
+      target: development
+    volumes:
+      # Enable hot reloading by mounting source code
+      - .:/app:rw
+      # Preserve data between container restarts
+      - threat_hunter_data:/app/data/threat_hunter_db
+      # Use local logs directory for development
+      - ./dev_logs:/app/logs
+      # Cache for faster model loading
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      - DEV_MODE=true
+      - DEBUG_ENABLED=true
+      - LOG_LEVEL=DEBUG
+      - PROCESSING_INTERVAL=60  # Faster processing for development
+    command: >
+      sh -c "
+        pip install --no-cache-dir pytest black flake8 mypy ipython &&
+        uvicorn main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
+      "
+    ports:
+      - "8000:8000"
+      - "5678:5678"  # Debug port for VS Code/PyCharm
+
+  # Enhanced service configurations for development
+  vector-store:
+    volumes:
+      - ./services/vector_store:/app:rw
+      - vector_store_data:/app/data
+    environment:
+      - DEV_MODE=true
+      - LOG_LEVEL=DEBUG
+      - BACKUP_INTERVAL=300  # More frequent backups in dev
+    command: >
+      sh -c "
+        pip install --no-cache-dir fastapi uvicorn faiss-cpu sentence-transformers redis numpy &&
+        uvicorn main:app --host 0.0.0.0 --port 8001 --reload --log-level debug
+      "
+
+  search-service:
+    volumes:
+      - ./services/search_service:/app:rw
+      - search_service_data:/app/data
+    environment:
+      - DEV_MODE=true
+      - LOG_LEVEL=DEBUG
+      - INDEX_REFRESH_INTERVAL=60  # Faster indexing in dev
+    command: >
+      sh -c "
+        pip install --no-cache-dir fastapi uvicorn bm25s scikit-learn redis numpy &&
+        uvicorn main:app --host 0.0.0.0 --port 8002 --reload --log-level debug
+      "
+
+  summary-store:
+    volumes:
+      - ./services/summary_store:/app:rw
+      - summary_store_data:/app/data
+    environment:
+      - DEV_MODE=true
+      - LOG_LEVEL=DEBUG
+      - COMPRESSION_ENABLED=false  # Disable compression for easier debugging
+    command: >
+      sh -c "
+        pip install --no-cache-dir fastapi uvicorn redis zstandard &&
+        uvicorn main:app --host 0.0.0.0 --port 8003 --reload --log-level debug
+      "
+
+  # =============================================================================
+  # Development-Only Services
+  # =============================================================================
+
+  # Elasticsearch for alternative search backend testing
+  elasticsearch:
+    profiles: []  # Always start in dev mode
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"  # Reduced memory for dev
+      - cluster.routing.allocation.disk.threshold_enabled=false
+
+  # Jupyter for data analysis and experimentation
+  jupyter:
+    profiles: []  # Always start in dev mode
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=threat-hunter-dev
+    volumes:
+      - .:/home/jovyan/work/source:ro
+      - ./notebooks:/home/jovyan/work/notebooks:rw
+      - threat_hunter_data:/home/jovyan/work/data:rw
+
+  # =============================================================================
+  # Development Tools and Utilities
+  # =============================================================================
+
+  # Database browser for Redis
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: threat-hunter-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    networks:
+      - threat-hunter-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: []  # Always start in dev mode
+
+  # Mailhog for email testing (if needed)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: threat-hunter-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP port
+      - "8025:8025"  # Web UI port
+    networks:
+      - threat-hunter-network
+    profiles:
+      - email-testing
+
+  # File browser for easy data access
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: threat-hunter-filebrowser
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - threat_hunter_data:/srv/threat_hunter_data
+      - vector_store_data:/srv/vector_store_data
+      - search_service_data:/srv/search_service_data
+      - summary_store_data:/srv/summary_store_data
+      - ./:/srv/source:ro
+    networks:
+      - threat-hunter-network
+    profiles:
+      - file-browser
+
+  # =============================================================================
+  # Development Database Services
+  # =============================================================================
+
+  # PostgreSQL for testing metadata storage alternatives
+  postgres:
+    image: postgres:15-alpine
+    container_name: threat-hunter-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=threat_hunter_dev
+      - POSTGRES_USER=threat_hunter
+      - POSTGRES_PASSWORD=dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./dev_sql:/docker-entrypoint-initdb.d
+    networks:
+      - threat-hunter-network
+    profiles:
+      - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U threat_hunter -d threat_hunter_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # pgAdmin for PostgreSQL management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: threat-hunter-pgadmin
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@threathunter.local
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    volumes:
+      - pgadmin_dev_data:/var/lib/pgadmin
+    networks:
+      - threat-hunter-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - postgres
+
+  # =============================================================================
+  # Development Monitoring Overrides
+  # =============================================================================
+
+  prometheus:
+    volumes:
+      - prometheus_data:/prometheus
+      - ./config/prometheus-dev.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'  # Shorter retention for dev
+      - '--web.enable-lifecycle'
+      - '--log.level=debug'
+
+  grafana:
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=redis-datasource,postgres-datasource
+      - GF_LOG_LEVEL=debug
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./config/grafana/dev-dashboards:/var/lib/grafana/dev-dashboards
+
+# =============================================================================
+# Development-Specific Volumes
+# =============================================================================
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  pgadmin_dev_data:
+    driver: local
+
+# =============================================================================
+# Development Network Configuration
+# =============================================================================
+
+networks:
+  threat-hunter-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -1,0 +1,117 @@
+# Prometheus Configuration for RAG-Enhanced Threat Hunter Pro
+# Monitors all services and collects performance metrics
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'threat-hunter-pro'
+    environment: 'production'
+
+# Alertmanager configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Rule files for alerting
+rule_files:
+  - "alert_rules.yml"
+
+scrape_configs:
+  # =============================================================================
+  # Core Application Metrics
+  # =============================================================================
+
+  # Main Threat Hunter application
+  - job_name: 'threat-hunter-app'
+    static_configs:
+      - targets: ['threat-hunter-app:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # Vector Store Service
+  - job_name: 'vector-store'
+    static_configs:
+      - targets: ['vector-store:8001']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Search Service
+  - job_name: 'search-service'
+    static_configs:
+      - targets: ['search-service:8002']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Summary Store Service
+  - job_name: 'summary-store'
+    static_configs:
+      - targets: ['summary-store:8003']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # =============================================================================
+  # Infrastructure Services
+  # =============================================================================
+
+  # Redis metrics (using redis_exporter)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # =============================================================================
+  # Optional Services (when enabled)
+  # =============================================================================
+
+  # Elasticsearch metrics (when running)
+  - job_name: 'elasticsearch'
+    static_configs:
+      - targets: ['elasticsearch:9200']
+    metrics_path: '/_prometheus/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    honor_labels: true
+
+  # =============================================================================
+  # System and Container Metrics
+  # =============================================================================
+
+  # Docker container metrics (if node_exporter is added)
+  # - job_name: 'node-exporter'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
+  #   scrape_interval: 30s
+  #   scrape_timeout: 10s
+
+  # cAdvisor for container metrics (if added)
+  # - job_name: 'cadvisor'
+  #   static_configs:
+  #     - targets: ['cadvisor:8080']
+  #   scrape_interval: 30s
+  #   scrape_timeout: 10s
+
+# =============================================================================
+# Remote Write Configuration (for external storage)
+# =============================================================================
+
+# remote_write:
+#   - url: "https://your-remote-storage/api/v1/write"
+#     basic_auth:
+#       username: "your-username"
+#       password: "your-password"

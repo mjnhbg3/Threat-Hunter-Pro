@@ -158,6 +158,10 @@ cython_debug/
 #  project, it is best to have this file in the project root directory.
 .idea/
 
+# =============================================================================
+# THREAT HUNTER PRO - SECURITY-FOCUSED GITIGNORE
+# =============================================================================
+
 # Application-specific ignores
 # Database files
 /var/ossec/integrations/threat_hunter_db/
@@ -167,12 +171,19 @@ cython_debug/
 # Log files
 *.log
 
-# Environment variables (contain API keys)
+# Environment variables (contain API keys and secrets)
+.env
+.env.*
+!.env.example
 .env.local
 .env.production
+.env.development
+.env.test
+.env.staging
 
 # Backup files
 *.backup
+*.bak
 app.py.backup
 
 # Development folders
@@ -182,3 +193,265 @@ broken_version/
 # OS files
 .DS_Store
 Thumbs.db
+
+# =============================================================================
+# SECURITY-SENSITIVE FILES AND DIRECTORIES
+# =============================================================================
+
+# Secrets and encryption keys
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.csr
+secrets/
+keys/
+certificates/
+vault/
+
+# Authentication and session files
+.htpasswd
+auth.json
+session_keys.json
+jwt_keys.json
+mfa_secrets.json
+
+# Threat Hunter specific security files
+/var/ossec/integrations/threat_hunter_secrets/
+security_config.json
+audit_keys.json
+encryption_keys.json
+
+# Database connection files
+database.json
+db_credentials.json
+connection_strings.json
+
+# API keys and tokens
+api_keys.json
+tokens.json
+credentials.json
+service_account.json
+.credentials
+
+# Security logs and audit trails
+security.log*
+audit.log*
+access.log*
+error.log*
+/var/log/threat_hunter/
+
+# Temporary security files
+*.tmp.key
+*.temp.crt
+security_*.tmp
+
+# =============================================================================
+# CLOUD PROVIDER CREDENTIALS
+# =============================================================================
+
+# AWS
+.aws/
+aws_credentials
+.boto
+boto.cfg
+
+# Google Cloud
+gcloud/
+.gcp/
+service-account-*.json
+google-credentials.json
+
+# Azure
+.azure/
+azure-credentials.json
+azureProfile.json
+
+# =============================================================================
+# VAULT AND SECRET MANAGEMENT
+# =============================================================================
+
+# HashiCorp Vault
+.vault-token
+vault_keys.json
+unseal_keys.json
+
+# Kubernetes secrets
+*.kubeconfig
+secrets.yaml
+sealed-secrets/
+
+# Docker secrets
+docker_secrets/
+.docker/
+
+# =============================================================================
+# MONITORING AND ALERTING
+# =============================================================================
+
+# Grafana
+grafana.ini
+grafana_data/
+
+# Prometheus
+prometheus_data/
+alertmanager_data/
+
+# Elasticsearch
+elasticsearch_data/
+kibana_data/
+
+# =============================================================================
+# THREAT INTELLIGENCE AND ANALYSIS
+# =============================================================================
+
+# Threat intel feeds
+threat_feeds/
+*.stix
+*.stix2
+*.ioc
+malware_samples/
+threat_intel_cache/
+
+# Analysis results
+analysis_reports/
+forensic_images/
+memory_dumps/
+
+# =============================================================================
+# BACKUP AND RECOVERY
+# =============================================================================
+
+# Backup files
+backups/
+*.backup
+*.dump
+*.sql.gz
+recovery_files/
+
+# Snapshot files
+snapshots/
+*.snapshot
+*.vmdk
+*.vhd
+
+# =============================================================================
+# DEVELOPMENT AND TESTING OVERRIDES
+# =============================================================================
+
+# Test databases with sensitive data
+test_data_*.db
+test_secrets.json
+mock_credentials.json
+
+# Development certificates
+dev_certs/
+localhost.crt
+localhost.key
+
+# IDE security plugin files
+.vscode/settings.json
+.idea/security.xml
+
+# =============================================================================
+# COMPLIANCE AND AUDITING
+# =============================================================================
+
+# Compliance reports
+compliance_reports/
+audit_reports/
+soc2_evidence/
+gdpr_reports/
+
+# Personal data exports
+personal_data/
+user_exports/
+data_subject_requests/
+
+# =============================================================================
+# NETWORK AND INFRASTRUCTURE
+# =============================================================================
+
+# Network configs with sensitive info
+network_config.json
+firewall_rules.json
+vpn_configs/
+
+# Infrastructure as code with secrets
+terraform.tfvars
+terraform.tfstate*
+.terraform/
+ansible_vault_*
+
+# =============================================================================
+# MISCELLANEOUS SECURITY
+# =============================================================================
+
+# Password files
+passwords.txt
+password_list.txt
+wordlists/
+
+# SSH keys
+id_rsa*
+id_ed25519*
+id_ecdsa*
+known_hosts
+authorized_keys
+
+# SSL/TLS related
+*.p7b
+*.p7c
+*.p7r
+*.spc
+
+# GPG keys
+*.gpg
+*.asc
+*.sig
+.gnupg/
+
+# Certificate stores
+*.jks
+*.keystore
+*.truststore
+
+# =============================================================================
+# SYSTEM ADMINISTRATION
+# =============================================================================
+
+# System logs that might contain sensitive data
+/var/log/
+/etc/shadow
+/etc/passwd.bak
+system_backup_*
+
+# Package manager files with credentials
+pip.conf
+.pypirc
+.npmrc
+.yarnrc
+
+# =============================================================================
+# NOTES FOR SECURITY TEAM
+# =============================================================================
+# 
+# This gitignore file is designed to prevent accidental commits of:
+# 1. API keys, passwords, and other secrets
+# 2. Certificates and cryptographic keys  
+# 3. Database files containing sensitive data
+# 4. Log files that may contain PII or security info
+# 5. Backup files that could expose sensitive data
+# 6. Cloud provider credentials
+# 7. Threat intelligence data
+# 8. Compliance and audit materials
+#
+# Remember to:
+# - Regularly audit what files are being committed
+# - Use git-secrets or similar tools to scan for secrets
+# - Keep this file updated as new sensitive file types are identified
+# - Train developers on secure coding practices
+# - Use separate repositories for truly sensitive documentation
+#
+# =============================================================================

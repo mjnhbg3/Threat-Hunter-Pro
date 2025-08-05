@@ -472,3 +472,151 @@ async def api_clear_database(user: str = Depends(check_auth)) -> Any:
     from .vector_db import clear_database
     await clear_database()
     return {"status": "Database cleared"}
+
+
+# Hierarchical Summarization API Endpoints
+
+@app.get("/api/hierarchical_summary/status")
+async def get_hierarchical_summary_status(user: str = Depends(check_auth)) -> Any:
+    """Get the status of the hierarchical summarization system."""
+    try:
+        from .rag_interface import RAGInterface
+        rag = RAGInterface()
+        status = await rag.get_hierarchical_summary_status()
+        return status
+    except Exception as e:
+        logging.error(f"Failed to get hierarchical summary status: {e}")
+        return {"available": False, "error": str(e)}
+
+
+@app.post("/api/hierarchical_summary/run_nightly")
+async def run_nightly_summarization(user: str = Depends(check_auth), target_date: str = None) -> Any:
+    """Run the nightly summarization process."""
+    try:
+        from .rag_interface import RAGInterface
+        rag = RAGInterface()
+        result = await rag.run_nightly_summarization(target_date)
+        return result
+    except Exception as e:
+        logging.error(f"Failed to run nightly summarization: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/hierarchical_summary/query")
+async def query_hierarchical_summaries(
+    query: str,
+    level: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    limit: int = 50,
+    user: str = Depends(check_auth)
+) -> Any:
+    """Query hierarchical summaries with filters."""
+    try:
+        from .rag_interface import RAGInterface
+        rag = RAGInterface()
+        result = await rag.query_hierarchical_summaries(
+            query=query,
+            level=level,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit
+        )
+        return result
+    except Exception as e:
+        logging.error(f"Failed to query hierarchical summaries: {e}")
+        return {"summaries": [], "error": str(e)}
+
+
+@app.get("/api/hierarchical_summary/levels")
+async def get_summary_levels(user: str = Depends(check_auth)) -> Any:
+    """Get available summary levels."""
+    try:
+        from .hierarchical_summary.models import SummaryLevel
+        return {
+            "levels": [level.value for level in SummaryLevel],
+            "descriptions": {
+                "cluster": "Groups of related logs (5-50 logs)",
+                "daily": "Daily security summary aggregating cluster summaries",
+                "weekly": "Weekly trends and major incidents analysis",
+                "monthly": "Monthly security posture assessment", 
+                "quarterly": "Quarterly executive reporting and strategic analysis"
+            }
+        }
+    except Exception as e:
+        logging.error(f"Failed to get summary levels: {e}")
+        return {"levels": [], "error": str(e)}
+
+
+@app.post("/api/hierarchical_summary/generate")
+async def generate_summary(
+    content: List[Dict[str, Any]],
+    scope: str = "cluster",
+    user: str = Depends(check_auth)
+) -> Any:
+    """Generate a summary for provided content."""
+    try:
+        from .rag_interface import RAGInterface
+        rag = RAGInterface()
+        
+        # Use the RAG interface to generate summary
+        result = await rag.summarize(content, scope)
+        
+        return {
+            "summary": result.summary,
+            "scope": result.scope,
+            "item_count": result.item_count,
+            "confidence_score": result.confidence_score,
+            "key_insights": result.key_insights,
+            "generation_time_ms": result.generation_time_ms,
+            "metadata": result.metadata
+        }
+    except Exception as e:
+        logging.error(f"Failed to generate summary: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/hierarchical_summary/performance")
+async def get_summary_performance_metrics(user: str = Depends(check_auth)) -> Any:
+    """Get performance metrics for the hierarchical summarization system."""
+    try:
+        from .rag_interface import RAGInterface
+        rag = RAGInterface()
+        
+        if not rag._hierarchical_summary:
+            return {"error": "Hierarchical summarizer not available"}
+            
+        if await rag._is_hierarchical_summarizer_ready():
+            status = await rag._hierarchical_summary.get_system_status()
+            return {
+                "performance_metrics": status.get("performance_metrics", {}),
+                "storage_stats": status.get("storage_stats", {}),
+                "last_updated": datetime.utcnow().isoformat()
+            }
+        else:
+            return {"error": "Hierarchical summarizer not ready"}
+            
+    except Exception as e:
+        logging.error(f"Failed to get performance metrics: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/hierarchical_summary/optimize")
+async def optimize_summarization_performance(user: str = Depends(check_auth)) -> Any:
+    """Run performance optimization on the hierarchical summarization system."""
+    try:
+        from .rag_interface import RAGInterface
+        rag = RAGInterface()
+        
+        if not rag._hierarchical_summary:
+            return {"error": "Hierarchical summarizer not available"}
+            
+        if await rag._is_hierarchical_summarizer_ready():
+            result = await rag._hierarchical_summary.optimize_performance()
+            return result
+        else:
+            return {"error": "Hierarchical summarizer not ready"}
+            
+    except Exception as e:
+        logging.error(f"Failed to optimize performance: {e}")
+        return {"error": str(e)}

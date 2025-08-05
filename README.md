@@ -1,8 +1,8 @@
-# Wazuh Threat Hunter Pro (Gemini Edition)
+# Threat Hunter Pro: Advanced AI-Powered Security Log Analysis
 
 An advanced AI-powered threat hunting application designed for comprehensive security log analysis using Google's Gemini AI models.
 
-## 🚀 Features
+## Features
 
 ### Core Capabilities
 - **Multi-stage Comprehensive Retrieval**: Advanced log search with 5 different strategies (entity-exact, related-term, semantic-context, broad-context, rule-based)
@@ -20,7 +20,7 @@ An advanced AI-powered threat hunting application designed for comprehensive sec
 - **Settings Migration**: Automatic upgrade of configuration parameters
 - **Background Processing**: Continuous log monitoring with 10-minute scan intervals
 
-## 🛠️ Installation
+## Installation
 
 ### Prerequisites
 - Python 3.8+
@@ -59,7 +59,7 @@ python run_app.py
 http://localhost:8000
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### API Rate Limits
 The application automatically manages Google AI Studio rate limits:
@@ -73,7 +73,7 @@ The application automatically manages Google AI Studio rate limits:
 - **Max Output Tokens**: 32,000 per response
 - **Context Window**: 200,000 tokens
 
-## 📊 Usage
+## Usage
 
 ### Dashboard Features
 - **Real-time Status**: Live application status with countdown to next scan
@@ -89,7 +89,7 @@ The application automatically manages Google AI Studio rate limits:
 - `/api/generate-script/{issue_id}` - Remediation script generation
 - `/metrics` - Prometheus metrics
 
-## 🧠 AI Models
+## AI Models
 
 The application uses Google's Gemini 2.5 models:
 - **Pro Model**: Advanced reasoning for complex analysis
@@ -98,7 +98,7 @@ The application uses Google's Gemini 2.5 models:
 
 Automatic model fallback ensures continuous operation even if specific models are unavailable.
 
-## 🔍 Search Capabilities
+## Search Capabilities
 
 ### Multi-stage Retrieval
 1. **Entity-Exact Search**: Direct entity matching
@@ -115,7 +115,7 @@ Extracts and prioritizes:
 - Security rule identifiers
 - Network protocols and ports
 
-## 📈 Monitoring
+## Monitoring
 
 Built-in metrics collection for:
 - API request rates and errors
@@ -124,7 +124,7 @@ Built-in metrics collection for:
 - Search performance statistics
 - Background worker health
 
-## 🔐 Security
+## Security
 
 - HTTP Basic Authentication
 - API key rotation and management
@@ -132,7 +132,7 @@ Built-in metrics collection for:
 - Rate limit protection
 - Input validation and sanitization
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -140,11 +140,11 @@ Built-in metrics collection for:
 4. Test thoroughly
 5. Submit a pull request
 
-## 📄 License
+## License
 
 This project is open source. Please ensure you comply with Google AI Studio's terms of service when using their API.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built with Claude Code assistance
 - Powered by Google Gemini AI models

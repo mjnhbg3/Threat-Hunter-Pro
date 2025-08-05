@@ -1,0 +1,31 @@
+# Grafana Dashboard Provisioning for RAG-Enhanced Threat Hunter Pro
+# Automatically loads dashboards on startup
+
+apiVersion: 1
+
+providers:
+  # =============================================================================
+  # Main Dashboard Provider
+  # =============================================================================
+  - name: 'threat-hunter-dashboards'
+    orgId: 1
+    folder: 'Threat Hunter Pro'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+
+  # =============================================================================
+  # Development Dashboard Provider
+  # =============================================================================
+  - name: 'threat-hunter-dev-dashboards'
+    orgId: 1
+    folder: 'Development'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dev-dashboards

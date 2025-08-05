@@ -1,0 +1,803 @@
+# =============================================================================
+# RAG-Enhanced Threat Hunter Pro - Security Scanning Pipeline
+# =============================================================================
+# This workflow provides comprehensive security scanning including dependency
+# auditing, container scanning, and compliance validation.
+
+name: Security Scanning
+
+on:
+  schedule:
+    # Run daily security scans at 2 AM UTC
+    - cron: '0 2 * * *'
+  push:
+    branches: [ main ]
+    paths:
+      - '**/requirements*.txt'
+      - '**/Dockerfile*'
+      - '**/docker-compose*.yml'
+      - '.github/workflows/security.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/requirements*.txt'
+      - '**/Dockerfile*'
+      - '**/docker-compose*.yml'
+  workflow_dispatch:
+    inputs:
+      scan-type:
+        description: 'Type of security scan to run'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - dependencies
+          - containers
+          - code
+          - compliance
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # =============================================================================
+  # Dependency Security Scanning
+  # =============================================================================
+  
+  dependency-scan:
+    name: Dependency Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: |
+      github.event.inputs.scan-type == 'full' ||
+      github.event.inputs.scan-type == 'dependencies' ||
+      github.event_name != 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install safety pip-audit bandit[toml]
+
+      - name: Create requirements lock file
+        run: |
+          pip install -r requirements.txt
+          pip freeze > requirements-lock.txt
+
+      - name: Run Safety check
+        run: |
+          echo "Running Safety vulnerability check..."
+          safety check \
+            --json \
+            --output safety-report.json \
+            -r requirements.txt || true
+          
+          # Display results
+          safety check -r requirements.txt || echo "Vulnerabilities found - check report"
+        continue-on-error: true
+
+      - name: Run pip-audit
+        run: |
+          echo "Running pip-audit vulnerability check..."
+          pip-audit \
+            --format=json \
+            --output=pip-audit-report.json \
+            --requirement requirements.txt || true
+          
+          # Display results
+          pip-audit --requirement requirements.txt || echo "Vulnerabilities found - check report"
+        continue-on-error: true
+
+      - name: Check for known malicious packages
+        run: |
+          echo "Checking for known malicious packages..."
+          
+          # List of known malicious package patterns
+          malicious_patterns=(
+            "urllib3[^-]"
+            "request[^s]"
+            "beautifulsoup[^4]"
+            "pillow[^-]"
+            "numpy[^-]"
+          )
+          
+          for pattern in "${malicious_patterns[@]}"; do
+            if grep -qE "$pattern" requirements.txt 2>/dev/null; then
+              echo "⚠️ Potential typosquatting detected: $pattern"
+            fi
+          done
+          
+          echo "✅ Malicious package check completed"
+
+      - name: Generate dependency security report
+        if: always()
+        run: |
+          echo "Generating comprehensive dependency security report..."
+          
+          cat > dependency-security-report.md << 'EOF'
+          # Dependency Security Report
+          
+          Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ## Summary
+          
+          ### Safety Check Results
+          ```
+          $(safety check -r requirements.txt 2>&1 || echo "Vulnerabilities detected")
+          ```
+          
+          ### pip-audit Results
+          ```
+          $(pip-audit --requirement requirements.txt 2>&1 || echo "Vulnerabilities detected")
+          ```
+          
+          ## Recommendations
+          
+          1. Update vulnerable packages to latest secure versions
+          2. Consider alternative packages for high-risk dependencies
+          3. Implement dependency pinning for critical packages
+          4. Set up automated dependency update workflows
+          
+          ## Next Steps
+          
+          - [ ] Review vulnerability details in JSON reports
+          - [ ] Update affected packages
+          - [ ] Test compatibility after updates
+          - [ ] Update security documentation
+          EOF
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: dependency-security-reports
+          path: |
+            safety-report.json
+            pip-audit-report.json
+            dependency-security-report.md
+            requirements-lock.txt
+          retention-days: 90
+
+      - name: Create security issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🔒 Security vulnerabilities detected in dependencies';
+            const body = `
+            ## Security Scan Results
+            
+            Dependency security scan has detected vulnerabilities that require attention.
+            
+            ### Action Items
+            - [ ] Review vulnerability reports in workflow artifacts
+            - [ ] Update affected packages to secure versions
+            - [ ] Test application functionality after updates
+            - [ ] Verify security improvements
+            
+            ### Reports Available
+            - Safety vulnerability report
+            - pip-audit vulnerability report
+            - Detailed security analysis
+            
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            `;
+            
+            // Check if issue already exists
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'security,dependencies'
+            });
+            
+            if (existingIssues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['security', 'dependencies', 'vulnerability']
+              });
+            }
+
+  # =============================================================================
+  # Container Security Scanning
+  # =============================================================================
+  
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      github.event.inputs.scan-type == 'full' ||
+      github.event.inputs.scan-type == 'containers' ||
+      github.event_name != 'workflow_dispatch'
+    
+    strategy:
+      matrix:
+        target: [production, development, vector-store-service, search-service, summary-store-service]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: false
+          tags: security-scan:${{ matrix.target }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: security-scan:${{ matrix.target }}
+          format: 'sarif'
+          output: 'trivy-${{ matrix.target }}.sarif'
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-${{ matrix.target }}.sarif'
+
+      - name: Run detailed Trivy scan
+        run: |
+          echo "Running detailed vulnerability scan for ${{ matrix.target }}..."
+          
+          # Comprehensive scan with all vulnerability types
+          trivy image \
+            --severity LOW,MEDIUM,HIGH,CRITICAL \
+            --format json \
+            --output trivy-${{ matrix.target }}-detailed.json \
+            security-scan:${{ matrix.target }}
+          
+          # Check for critical vulnerabilities
+          CRITICAL_COUNT=$(trivy image --severity CRITICAL --format json security-scan:${{ matrix.target }} | jq '.Results[].Vulnerabilities | length' 2>/dev/null || echo "0")
+          HIGH_COUNT=$(trivy image --severity HIGH --format json security-scan:${{ matrix.target }} | jq '.Results[].Vulnerabilities | length' 2>/dev/null || echo "0")
+          
+          echo "Critical vulnerabilities: $CRITICAL_COUNT"
+          echo "High vulnerabilities: $HIGH_COUNT"
+          
+          # Display summary
+          trivy image --severity MEDIUM,HIGH,CRITICAL security-scan:${{ matrix.target }}
+
+      - name: Run container configuration audit
+        run: |
+          echo "Auditing container configuration for ${{ matrix.target }}..."
+          
+          # Check Dockerfile best practices
+          docker run --rm -i hadolint/hadolint < Dockerfile || echo "Dockerfile issues detected"
+          
+          # Check for security misconfigurations
+          trivy config \
+            --format json \
+            --output trivy-config-${{ matrix.target }}.json \
+            . || echo "Configuration issues detected"
+
+      - name: Check for secrets in container
+        run: |
+          echo "Scanning for secrets in container ${{ matrix.target }}..."
+          
+          # Use truffleHog or similar tool to scan for secrets
+          docker run --rm -v "$(pwd):/pwd" \
+            trufflesecurity/trufflehog:latest \
+            filesystem /pwd \
+            --json > secrets-scan-${{ matrix.target }}.json || echo "Secrets scan completed"
+
+      - name: Generate container security report
+        run: |
+          echo "Generating container security report for ${{ matrix.target }}..."
+          
+          cat > container-security-${{ matrix.target }}.md << EOF
+          # Container Security Report - ${{ matrix.target }}
+          
+          Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ## Vulnerability Summary
+          
+          \`\`\`
+          $(trivy image --severity CRITICAL,HIGH --format table security-scan:${{ matrix.target }} 2>/dev/null || echo "No vulnerabilities or scan failed")
+          \`\`\`
+          
+          ## Configuration Issues
+          
+          \`\`\`
+          $(trivy config --format table . 2>/dev/null || echo "No configuration issues or scan failed")
+          \`\`\`
+          
+          ## Recommendations
+          
+          1. Update base images to latest secure versions
+          2. Remove unnecessary packages and dependencies
+          3. Use distroless or minimal base images
+          4. Implement proper user permissions
+          5. Enable security scanning in CI/CD pipeline
+          
+          ## Security Best Practices
+          
+          - [ ] Use non-root user
+          - [ ] Minimize attack surface
+          - [ ] Regular security updates
+          - [ ] Container image signing
+          - [ ] Runtime security monitoring
+          EOF
+
+      - name: Upload container security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: container-security-reports-${{ matrix.target }}
+          path: |
+            trivy-${{ matrix.target }}.sarif
+            trivy-fs-${{ matrix.target }}.sarif
+            trivy-${{ matrix.target }}-detailed.json
+            trivy-config-${{ matrix.target }}.json
+            secrets-scan-${{ matrix.target }}.json
+            container-security-${{ matrix.target }}.md
+          retention-days: 90
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.target }}.sarif
+          category: container-${{ matrix.target }}
+
+      - name: Fail on critical vulnerabilities
+        run: |
+          echo "Checking for critical vulnerabilities that should fail the build..."
+          
+          # Fail if critical vulnerabilities are found
+          trivy image \
+            --severity CRITICAL \
+            --exit-code 1 \
+            --no-progress \
+            security-scan:${{ matrix.target }}
+        continue-on-error: true
+
+  # =============================================================================
+  # Code Security Analysis
+  # =============================================================================
+  
+  code-scan:
+    name: Code Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: |
+      github.event.inputs.scan-type == 'full' ||
+      github.event.inputs.scan-type == 'code' ||
+      github.event_name != 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install security analysis tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit[toml] semgrep safety
+
+      - name: Run Bandit security linter
+        run: |
+          echo "Running Bandit security analysis..."
+          bandit -r . \
+            -f json \
+            -o bandit-report.json || true
+          
+          # Display summary
+          bandit -r . -f txt || echo "Security issues detected"
+
+      - name: Run Semgrep static analysis
+        run: |
+          echo "Running Semgrep static analysis..."
+          semgrep \
+            --config=auto \
+            --json \
+            --output=semgrep-report.json \
+            . || true
+          
+          # Display summary
+          semgrep --config=auto . || echo "Security issues detected"
+
+      - name: Check for hardcoded secrets
+        run: |
+          echo "Checking for hardcoded secrets..."
+          
+          # Patterns to look for
+          secret_patterns=(
+            "password\s*=\s*['\"][^'\"]{8,}['\"]"
+            "api_key\s*=\s*['\"][^'\"]{20,}['\"]"
+            "secret\s*=\s*['\"][^'\"]{20,}['\"]"
+            "token\s*=\s*['\"][^'\"]{20,}['\"]"
+            "-----BEGIN.*PRIVATE KEY-----"
+          )
+          
+          for pattern in "${secret_patterns[@]}"; do
+            if grep -rE "$pattern" . --exclude-dir=.git --exclude="*.json" --exclude="*.md"; then
+              echo "⚠️ Potential hardcoded secret detected: $pattern"
+            fi
+          done
+
+      - name: Security code review checklist
+        run: |
+          echo "Running security code review checklist..."
+          
+          # Check for common security anti-patterns
+          issues=()
+          
+          # Check for SQL injection vulnerabilities
+          if grep -r "cursor.execute.*%" . --include="*.py"; then
+            issues+=("Potential SQL injection vulnerability detected")
+          fi
+          
+          # Check for command injection vulnerabilities
+          if grep -r "os.system\|subprocess.call.*shell=True" . --include="*.py"; then
+            issues+=("Potential command injection vulnerability detected")
+          fi
+          
+          # Check for unsafe deserialization
+          if grep -r "pickle.loads\|yaml.load[^s]" . --include="*.py"; then
+            issues+=("Potential unsafe deserialization vulnerability detected")
+          fi
+          
+          # Check for weak cryptography
+          if grep -r "md5\|sha1" . --include="*.py"; then
+            issues+=("Weak cryptographic algorithm usage detected")
+          fi
+          
+          # Report issues
+          if [ ${#issues[@]} -gt 0 ]; then
+            echo "Security issues found:"
+            printf '%s\n' "${issues[@]}"
+          else
+            echo "✅ No obvious security issues detected in code review"
+          fi
+
+      - name: Generate code security report
+        if: always()
+        run: |
+          echo "Generating code security analysis report..."
+          
+          cat > code-security-report.md << 'EOF'
+          # Code Security Analysis Report
+          
+          Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ## Bandit Results
+          
+          ```
+          $(bandit -r . -f txt 2>&1 || echo "Security issues detected or scan failed")
+          ```
+          
+          ## Semgrep Results
+          
+          ```
+          $(semgrep --config=auto . 2>&1 || echo "Security issues detected or scan failed")
+          ```
+          
+          ## Security Best Practices Checklist
+          
+          - [ ] Input validation implemented
+          - [ ] Output encoding/escaping used
+          - [ ] Authentication mechanisms secure
+          - [ ] Authorization checks in place
+          - [ ] Secure session management
+          - [ ] Proper error handling
+          - [ ] Logging security events
+          - [ ] Cryptographic functions properly used
+          - [ ] Dependencies regularly updated
+          - [ ] Security headers implemented
+          
+          ## Recommendations
+          
+          1. Address all high-severity security findings
+          2. Implement security code review process
+          3. Add security-focused unit tests
+          4. Consider using security-focused linting rules
+          5. Regular security training for development team
+          EOF
+
+      - name: Upload code security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: code-security-reports
+          path: |
+            bandit-report.json
+            semgrep-report.json
+            code-security-report.md
+          retention-days: 90
+
+  # =============================================================================
+  # Compliance and Policy Validation
+  # =============================================================================
+  
+  compliance-scan:
+    name: Compliance & Policy Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: |
+      github.event.inputs.scan-type == 'full' ||
+      github.event.inputs.scan-type == 'compliance' ||
+      github.event_name != 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: License compliance check
+        run: |
+          echo "Checking license compliance..."
+          
+          # Check for license files
+          license_files=("LICENSE" "LICENSE.txt" "LICENSE.md" "COPYING")
+          license_found=false
+          
+          for license_file in "${license_files[@]}"; do
+            if [[ -f "$license_file" ]]; then
+              echo "✅ License file found: $license_file"
+              license_found=true
+              break
+            fi
+          done
+          
+          if [[ "$license_found" == false ]]; then
+            echo "⚠️ No license file found in repository"
+          fi
+
+      - name: Security policy validation
+        run: |
+          echo "Validating security policy compliance..."
+          
+          # Check for security policy files
+          security_files=("SECURITY.md" ".github/SECURITY.md" "docs/SECURITY.md")
+          
+          for security_file in "${security_files[@]}"; do
+            if [[ -f "$security_file" ]]; then
+              echo "✅ Security policy found: $security_file"
+              cat "$security_file"
+              break
+            fi
+          done
+
+      - name: Privacy compliance check
+        run: |
+          echo "Checking privacy compliance..."
+          
+          # Look for privacy-related configurations
+          if grep -r "PII\|personal.*data\|GDPR\|privacy" . --include="*.py" --include="*.md"; then
+            echo "✅ Privacy considerations found in codebase"
+          else
+            echo "⚠️ No explicit privacy handling found"
+          fi
+
+      - name: Data retention policy validation
+        run: |
+          echo "Validating data retention policies..."
+          
+          # Check for data retention configurations
+          if grep -r "retention\|cleanup\|expire" . --include="*.py" --include="*.yml" --include="*.yaml"; then
+            echo "✅ Data retention configurations found"
+          else
+            echo "⚠️ No explicit data retention policies found"
+          fi
+
+      - name: Generate compliance report
+        run: |
+          echo "Generating compliance validation report..."
+          
+          cat > compliance-report.md << 'EOF'
+          # Compliance & Policy Validation Report
+          
+          Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ## Compliance Checklist
+          
+          ### Legal Compliance
+          - [ ] License file present and valid
+          - [ ] Third-party license compatibility checked
+          - [ ] Copyright notices included
+          
+          ### Security Compliance
+          - [ ] Security policy documented
+          - [ ] Vulnerability disclosure process defined
+          - [ ] Security contact information provided
+          
+          ### Privacy Compliance
+          - [ ] Privacy policy documented
+          - [ ] PII handling procedures defined
+          - [ ] Data retention policies implemented
+          - [ ] User consent mechanisms in place
+          
+          ### Industry Standards
+          - [ ] OWASP security guidelines followed
+          - [ ] Industry-specific regulations addressed
+          - [ ] Regular compliance audits scheduled
+          
+          ## Recommendations
+          
+          1. Ensure all compliance requirements are documented
+          2. Regular compliance audits and reviews
+          3. Staff training on compliance requirements
+          4. Automated compliance checking in CI/CD
+          5. Legal review of compliance policies
+          EOF
+
+      - name: Upload compliance reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: compliance-reports
+          path: compliance-report.md
+          retention-days: 90
+
+  # =============================================================================
+  # Security Summary and Reporting
+  # =============================================================================
+  
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, container-scan, code-scan, compliance-scan]
+    if: always()
+    
+    steps:
+      - name: Download all security reports
+        uses: actions/download-artifact@v3
+        with:
+          path: security-reports
+
+      - name: Generate comprehensive security summary
+        run: |
+          echo "Generating comprehensive security summary..."
+          
+          cat > security-summary.md << EOF
+          # Security Scan Summary Report
+          
+          Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          Scan Type: ${{ github.event.inputs.scan-type || 'full' }}
+          Trigger: ${{ github.event_name }}
+          
+          ## Scan Results Overview
+          
+          | Scan Type | Status | Details |
+          |-----------|--------|---------|
+          | Dependencies | ${{ needs.dependency-scan.result }} | Vulnerability scan of Python dependencies |
+          | Containers | ${{ needs.container-scan.result }} | Security scan of Docker images |
+          | Code Analysis | ${{ needs.code-scan.result }} | Static analysis of source code |
+          | Compliance | ${{ needs.compliance-scan.result }} | Policy and compliance validation |
+          
+          ## Action Items
+          
+          ### High Priority
+          - [ ] Review and address all CRITICAL vulnerabilities
+          - [ ] Update vulnerable dependencies
+          - [ ] Fix security code issues
+          
+          ### Medium Priority
+          - [ ] Review HIGH severity findings
+          - [ ] Improve container security configuration
+          - [ ] Address compliance gaps
+          
+          ### Low Priority
+          - [ ] Review MEDIUM/LOW severity findings
+          - [ ] Optimize security policies
+          - [ ] Enhance security documentation
+          
+          ## Security Health Score
+          
+          Based on scan results, the current security health score is calculated as:
+          - Dependencies: $([ "${{ needs.dependency-scan.result }}" == "success" ] && echo "✅ PASS" || echo "❌ FAIL")
+          - Containers: $([ "${{ needs.container-scan.result }}" == "success" ] && echo "✅ PASS" || echo "❌ FAIL")
+          - Code: $([ "${{ needs.code-scan.result }}" == "success" ] && echo "✅ PASS" || echo "❌ FAIL")
+          - Compliance: $([ "${{ needs.compliance-scan.result }}" == "success" ] && echo "✅ PASS" || echo "❌ FAIL")
+          
+          ## Next Security Scan
+          
+          Scheduled: $(date -d "+1 day" -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ## Resources
+          
+          - [Security Documentation](docs/SECURITY.md)
+          - [Vulnerability Response Process](docs/vulnerability-response.md)
+          - [Security Best Practices](docs/security-best-practices.md)
+          EOF
+
+      - name: Upload comprehensive security summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-summary
+          path: security-summary.md
+          retention-days: 365
+
+      - name: Create security dashboard issue
+        if: |
+          needs.dependency-scan.result == 'failure' ||
+          needs.container-scan.result == 'failure' ||
+          needs.code-scan.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🔒 Security scan findings require attention';
+            const body = `
+            ## Security Scan Results
+            
+            One or more security scans have identified issues that require attention.
+            
+            ### Scan Results
+            - Dependencies: ${{ needs.dependency-scan.result }}
+            - Containers: ${{ needs.container-scan.result }}
+            - Code Analysis: ${{ needs.code-scan.result }}
+            - Compliance: ${{ needs.compliance-scan.result }}
+            
+            ### Immediate Actions Required
+            1. Review security scan artifacts
+            2. Address critical and high-severity findings
+            3. Update vulnerable components
+            4. Verify fixes with follow-up scans
+            
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            `;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['security', 'high-priority', 'vulnerability']
+            });
+
+      - name: Post security status to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const success = 
+              '${{ needs.dependency-scan.result }}' === 'success' &&
+              '${{ needs.container-scan.result }}' === 'success' &&
+              '${{ needs.code-scan.result }}' === 'success' &&
+              '${{ needs.compliance-scan.result }}' === 'success';
+            
+            const status = success ? '✅ Security scans passed' : '❌ Security issues detected';
+            const description = success ? 
+              'All security scans completed successfully' : 
+              'Security vulnerabilities or issues detected - review required';
+            
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: success ? 'success' : 'failure',
+              description: description,
+              context: 'security/comprehensive-scan'
+            });

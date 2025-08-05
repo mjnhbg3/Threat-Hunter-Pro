@@ -1,0 +1,351 @@
+# RAG-Enhanced Threat Hunter Pro - Production Docker Compose
+# This configuration provides a complete infrastructure setup with all required services
+# for the Threat Hunter Pro system with enhanced RAG capabilities.
+
+version: '3.8'
+
+networks:
+  threat-hunter-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  # Data persistence volumes
+  threat_hunter_data:
+    driver: local
+  vector_store_data:
+    driver: local
+  search_service_data:
+    driver: local
+  summary_store_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  jupyter_data:
+    driver: local
+
+services:
+  # =============================================================================
+  # Core Application Services
+  # =============================================================================
+
+  threat-hunter-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: threat-hunter-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - DB_DIR=/app/data/threat_hunter_db
+      - LOG_FILE=/app/logs/alerts.json
+      - REDIS_URL=redis://redis:6379/0
+      - VECTOR_STORE_URL=http://vector-store:8001
+      - SEARCH_SERVICE_URL=http://search-service:8002
+      - SUMMARY_STORE_URL=http://summary-store:8003
+      - PROMETHEUS_GATEWAY_URL=http://prometheus:9090
+    env_file:
+      - .env
+    volumes:
+      # Preserve existing database directory
+      - threat_hunter_data:/app/data/threat_hunter_db
+      # Mount Wazuh logs directory (adjust path as needed)
+      - /var/ossec/logs/alerts:/app/logs:ro
+      # Model cache for SentenceTransformers
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - threat-hunter-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      vector-store:
+        condition: service_healthy
+      search-service:
+        condition: service_healthy
+      summary-store:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # =============================================================================
+  # Enhanced RAG Services
+  # =============================================================================
+
+  vector-store:
+    image: python:3.11-slim
+    container_name: threat-hunter-vector-store
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONPATH=/app
+      - VECTOR_DB_PATH=/app/data/vector_db.faiss
+      - METADATA_DB_PATH=/app/data/metadata.json
+      - REDIS_URL=redis://redis:6379/1
+      - BACKUP_INTERVAL=3600
+    volumes:
+      - vector_store_data:/app/data
+      - ./services/vector_store:/app
+    networks:
+      - threat-hunter-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "
+        pip install fastapi uvicorn faiss-cpu sentence-transformers redis numpy &&
+        python /app/main.py
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  search-service:
+    image: python:3.11-slim
+    container_name: threat-hunter-search-service
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      - PYTHONPATH=/app
+      - DATA_PATH=/app/data
+      - REDIS_URL=redis://redis:6379/2
+      - INDEX_REFRESH_INTERVAL=300
+    volumes:
+      - search_service_data:/app/data
+      - ./services/search_service:/app
+    networks:
+      - threat-hunter-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "
+        pip install fastapi uvicorn bm25s scikit-learn redis numpy &&
+        python /app/main.py
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  summary-store:
+    image: python:3.11-slim
+    container_name: threat-hunter-summary-store
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    environment:
+      - PYTHONPATH=/app
+      - DATA_PATH=/app/data
+      - REDIS_URL=redis://redis:6379/3
+      - COMPRESSION_ENABLED=true
+    volumes:
+      - summary_store_data:/app/data
+      - ./services/summary_store:/app
+    networks:
+      - threat-hunter-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "
+        pip install fastapi uvicorn redis zstandard &&
+        python /app/main.py
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # =============================================================================
+  # Infrastructure Services
+  # =============================================================================
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: threat-hunter-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - threat-hunter-network
+    command: >
+      sh -c "
+        if [ -n '$REDIS_PASSWORD' ]; then
+          redis-server /usr/local/etc/redis/redis.conf --requirepass $REDIS_PASSWORD
+        else
+          redis-server /usr/local/etc/redis/redis.conf
+        fi
+      "
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =============================================================================
+  # Monitoring and Observability
+  # =============================================================================
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: threat-hunter-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - threat-hunter-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: threat-hunter-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - threat-hunter-network
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # =============================================================================
+  # Development and Testing Services (Optional)
+  # =============================================================================
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: threat-hunter-elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - threat-hunter-network
+    profiles:
+      - dev
+      - testing
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  jupyter:
+    image: jupyter/scipy-notebook:latest
+    container_name: threat-hunter-jupyter
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-threat-hunter-dev}
+    volumes:
+      - jupyter_data:/home/jovyan/work
+      - ./notebooks:/home/jovyan/work/notebooks
+      - threat_hunter_data:/home/jovyan/work/data
+    networks:
+      - threat-hunter-network
+    profiles:
+      - dev
+      - analysis
+    command: >
+      sh -c "
+        pip install sentence-transformers faiss-cpu google-generativeai bm25s spacy &&
+        python -m spacy download en_core_web_sm &&
+        start-notebook.sh --NotebookApp.token='${JUPYTER_TOKEN:-threat-hunter-dev}'
+      "
+
+  # =============================================================================
+  # Health Check and Utility Services
+  # =============================================================================
+
+  health-checker:
+    image: alpine:latest
+    container_name: threat-hunter-health-checker
+    restart: "no"
+    volumes:
+      - ./scripts/health_check.sh:/health_check.sh
+    networks:
+      - threat-hunter-network
+    profiles:
+      - health-check
+    command: >
+      sh -c "
+        apk add --no-cache curl &&
+        chmod +x /health_check.sh &&
+        /health_check.sh
+      "
+    depends_on:
+      - threat-hunter-app
+      - vector-store
+      - search-service
+      - summary-store
+      - redis
+      - prometheus
+      - grafana

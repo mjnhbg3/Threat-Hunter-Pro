@@ -1,0 +1,76 @@
+# Grafana Datasources Configuration for RAG-Enhanced Threat Hunter Pro
+# Automatically provisions datasources on startup
+
+apiVersion: 1
+
+datasources:
+  # =============================================================================
+  # Prometheus Datasource
+  # =============================================================================
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 15s
+      queryTimeout: 60s
+      httpMethod: POST
+    version: 1
+
+  # =============================================================================
+  # Redis Datasource
+  # =============================================================================
+  - name: Redis
+    type: redis-datasource
+    access: proxy
+    url: redis://redis:6379
+    isDefault: false
+    editable: true
+    jsonData:
+      client: standalone
+      poolSize: 5
+      timeout: 10
+      pingInterval: 0
+      pipelineWindow: 0
+    version: 1
+
+  # =============================================================================
+  # Optional Datasources (when services are enabled)
+  # =============================================================================
+
+  # Elasticsearch datasource (when running)
+  - name: Elasticsearch
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    isDefault: false
+    editable: true
+    database: threat-hunter-logs
+    jsonData:
+      interval: Daily
+      timeField: "@timestamp"
+      esVersion: "8.10.0"
+      maxConcurrentShardRequests: 5
+      logMessageField: message
+      logLevelField: level
+    version: 1
+
+  # PostgreSQL datasource (when running with postgres profile)
+  - name: PostgreSQL
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    isDefault: false
+    editable: true
+    database: threat_hunter_dev
+    user: threat_hunter
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+    secureJsonData:
+      password: dev_password
+    version: 1
