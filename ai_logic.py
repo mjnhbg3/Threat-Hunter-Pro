@@ -745,13 +745,18 @@ Return ONLY the JSON object."""
         logging.info(f"Sending comprehensive analysis prompt to AI with {len(logs)} logs")
         raw_response = await call_gemini_api(prompt, is_json_output=True, model_name=FULL_MODEL)
         logging.info(f"AI raw response (first 500 chars): {raw_response[:500]}")
+        logging.info(f"Full response length: {len(raw_response)} characters")
         json_str = extract_json_from_string(raw_response)
         
         if not json_str:
             logging.warning(f"Failed to extract JSON from comprehensive analysis. Raw response length: {len(raw_response)}")
-            logging.warning(f"Raw response content: {raw_response}")
+            logging.warning(f"Raw response content (first 2000 chars): {raw_response[:2000]}")
+            if len(raw_response) > 2000:
+                logging.warning(f"Raw response content (last 1000 chars): ...{raw_response[-1000:]}")
             return {"security_issues": [], "operational_issues": []}
         
+        logging.info(f"Extracted JSON string length: {len(json_str)} characters")
+        logging.info(f"Extracted JSON (first 300 chars): {json_str[:300]}")
         result = json.loads(json_str)
         
         # Handle wrapped response from Gemini API
@@ -759,9 +764,25 @@ Return ONLY the JSON object."""
             try:
                 result = json.loads(result["response"])
                 logging.info("Unwrapped nested JSON response from AI")
-            except json.JSONDecodeError:
-                logging.warning("Failed to parse nested response JSON")
-                return {"security_issues": [], "operational_issues": []}
+            except json.JSONDecodeError as e:
+                logging.warning(f"Failed to parse nested response JSON: {e}")
+                logging.warning(f"Nested response content: {result['response'][:1000]}...")
+                # Try to extract JSON from the response text if it's malformed
+                response_text = result["response"]
+                
+                # Look for JSON structure in the response
+                json_match = re.search(r'\{.*"security_issues".*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        extracted_json = json_match.group(0)
+                        result = json.loads(extracted_json)
+                        logging.info("Successfully extracted JSON from malformed response")
+                    except json.JSONDecodeError:
+                        logging.error("Could not extract valid JSON from response")
+                        return {"security_issues": [], "operational_issues": []}
+                else:
+                    logging.error("No JSON structure found in response")
+                    return {"security_issues": [], "operational_issues": []}
         
         # Validate structure
         if not isinstance(result, dict):
