@@ -632,20 +632,28 @@ async def _process_and_add_comprehensive_issues(detected_issues: List[Dict[str, 
         new_issues: List[Dict[str, Any]] = []
         for issue_data in detected_issues:
             try:
-                # Ensure the issue has all required fields
-                if not all(k in issue_data for k in ['id', 'title', 'severity', 'summary']):
-                    logging.warning(f"Issue missing required fields: {issue_data}")
+                # Check if essential fields exist (title and severity are minimum)
+                if not issue_data.get('title') or not issue_data.get('severity'):
+                    logging.warning(f"Issue missing essential fields (title/severity): {issue_data}")
                     continue
+                
+                # Generate unique ID if missing
+                issue_id = issue_data.get('id')
+                if not issue_id:
+                    # Create ID from title hash and timestamp
+                    title_hash = hashlib.md5(issue_data['title'].encode()).hexdigest()[:8]
+                    issue_id = f"comp_{title_hash}_{int(time.time())}"
                 
                 # Add default fields if missing
                 issue = {
-                    "id": issue_data.get('id', f"comp_{int(time.time())}_{len(new_issues)}"),
+                    "id": issue_id,
                     "title": issue_data.get('title', 'Unknown Issue'),
-                    "severity": issue_data.get('severity', 'medium'),
+                    "severity": issue_data.get('severity', 'medium').lower(),
                     "summary": issue_data.get('summary', 'No summary available'),
                     "category": issue_data.get('category', 'operational'),
                     "timestamp": datetime.now().isoformat(),
                     "related_logs": issue_data.get('related_logs', []),
+                    "recommendation": issue_data.get('recommendation', ''),
                     "source": "comprehensive_analysis"
                 }
                 
@@ -804,7 +812,15 @@ async def analyze_context_and_identify_issues(recent_logs: List[Dict[str, Any]])
         # Process and add comprehensive issues to dashboard immediately
         if all_detected_issues:
             logging.info(f"Processing {len(all_detected_issues)} comprehensive issues for dashboard")
-            await _process_and_add_comprehensive_issues(all_detected_issues, recent_logs)
+            # Tag issues with proper categories before processing
+            categorized_issues = []
+            for issue in comprehensive_results["security_issues"]:
+                issue["category"] = "security"
+                categorized_issues.append(issue)
+            for issue in comprehensive_results["operational_issues"]:
+                issue["category"] = "operational" 
+                categorized_issues.append(issue)
+            await _process_and_add_comprehensive_issues(categorized_issues, recent_logs)
         
         state.set_app_status("Summarizing recent logs...")
         recent_logs_subset = recent_logs[:200]
@@ -1451,7 +1467,15 @@ async def _perform_enhanced_analysis_with_entities(
     # Process and add comprehensive issues to dashboard immediately
     if all_detected_issues:
         logging.info(f"Processing {len(all_detected_issues)} comprehensive issues for enhanced analysis")
-        await _process_and_add_comprehensive_issues(all_detected_issues, recent_logs)
+        # Tag issues with proper categories before processing
+        categorized_issues = []
+        for issue in comprehensive_results["security_issues"]:
+            issue["category"] = "security"
+            categorized_issues.append(issue)
+        for issue in comprehensive_results["operational_issues"]:
+            issue["category"] = "operational"
+            categorized_issues.append(issue)
+        await _process_and_add_comprehensive_issues(categorized_issues, recent_logs)
     
     # Prepare enhanced context
     recent_logs_str = prepare_full_log_context(recent_logs)
