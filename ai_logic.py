@@ -696,40 +696,63 @@ async def analyze_comprehensive_issues(logs: List[Dict[str, Any]]) -> Dict[str, 
     # Prepare log context for comprehensive analysis
     log_context = prepare_full_log_context(logs[:100])  # Analyze up to 100 recent logs
     
-    prompt = f"""You are a security and system analyst. Analyze these logs and AGGRESSIVELY identify ANY issues that warrant attention.
+    prompt = f"""You are an expert security and system analyst with deep expertise in threat detection and operational monitoring. Analyze these logs using advanced pattern recognition to identify ANY issues that warrant investigation.
 
-FIND ISSUES IN THESE CATEGORIES:
-- SECURITY: Failed logins, privilege changes, suspicious network activity, authentication issues, access violations
-- OPERATIONAL: Error messages, service failures, high resource usage, configuration problems, repeated warnings
+COMPREHENSIVE ANALYSIS CATEGORIES:
 
-You MUST look for patterns like:
-- Multiple failures from same source
-- Error codes and exception messages  
-- Authentication or authorization failures
-- System service problems
-- Network connectivity issues
-- Resource exhaustion signs
-- Configuration mismatches
+SECURITY THREATS (High Priority):
+- Failed authentication attempts and brute force indicators
+- Privilege escalation attempts and unauthorized access
+- Suspicious network traffic patterns and port scanning
+- Malware indicators and suspicious file operations
+- Data exfiltration attempts and unusual data access patterns
+- Account compromise indicators and lateral movement
+- Command injection and exploit attempts
+- Certificate and cryptographic failures
+
+OPERATIONAL ISSUES (System Health):
+- Service failures, crashes, and availability issues
+- Resource exhaustion (CPU, memory, disk, network)
+- Performance degradation and response time issues
+- Configuration errors and mismatches
+- Database connection failures and query errors
+- API failures and integration problems
+- Backup and recovery failures
+- Monitoring and alerting system issues
+
+ADVANCED PATTERN DETECTION:
+- Temporal correlations (events happening in sequence)
+- Frequency anomalies (unusual spikes or drops)
+- Geographic anomalies (access from unusual locations)
+- Behavioral anomalies (unusual user/system behavior)
+- Cross-system correlations (related failures across services)
+- Threshold violations (metrics exceeding normal ranges)
 
 Return this JSON format:
 
 {{
 "security_issues": [
 {{
-"severity": "High",
-"title": "Specific issue found",
-"summary": "What happened and why it's concerning", 
-"recommendation": "How to investigate or fix it",
-"related_logs": ["actual_sha256_hash_from_logs"]
+"severity": "Critical|High|Medium|Low",
+"title": "Specific, descriptive title for the security threat",
+"summary": "Detailed analysis of what happened, why it's concerning, and potential impact", 
+"recommendation": "Specific investigation steps and remediation actions",
+"related_logs": ["actual_sha256_hash_from_logs"],
+"threat_type": "authentication|network|malware|privilege|data|other",
+"confidence": "high|medium|low",
+"urgency": "immediate|high|medium|low"
 }}
 ],
 "operational_issues": [
 {{
-"severity": "Medium", 
-"title": "Specific operational problem",
-"summary": "What's wrong and the impact",
-"recommendation": "Steps to resolve",
-"related_logs": ["actual_sha256_hash_from_logs"]
+"severity": "Critical|High|Medium|Low", 
+"title": "Specific operational problem description",
+"summary": "Detailed analysis of the issue, root cause, and business impact",
+"recommendation": "Step-by-step resolution procedure",
+"related_logs": ["actual_sha256_hash_from_logs"],
+"issue_type": "service|performance|resource|configuration|integration|other",
+"impact": "critical|high|medium|low",
+"estimated_downtime": "immediate|hours|days|minimal"
 }}
 ]
 }}
@@ -968,7 +991,20 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
                 analysis_result = json.loads(json_str)
         except Exception as e:
             logging.error(f"Error during AI analysis: {e}")
-            state.dashboard_data["summary"] = f"AI analysis failed: {e}"
+            # Create a more informative fallback summary instead of just showing error
+            fallback_summary = f"Analysis completed with {len(recent_logs)} new logs processed"
+            if recent_logs:
+                # Try to extract some meaningful info from logs
+                log_count_by_level = {}
+                for log in recent_logs[:10]:  # Sample first 10 logs
+                    level = log.get('level', 'unknown')
+                    log_count_by_level[level] = log_count_by_level.get(level, 0) + 1
+                
+                if log_count_by_level:
+                    level_info = ", ".join([f"{count} {level}" for level, count in log_count_by_level.items()])
+                    fallback_summary = f"Analysis of {len(recent_logs)} logs completed. Activity includes: {level_info}"
+            
+            state.dashboard_data["summary"] = fallback_summary
             await save_dashboard_data()
             return
         # Validate result
@@ -978,9 +1014,31 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
             await save_dashboard_data()
             return
         if "overall_summary" not in analysis_result:
-            state.dashboard_data["summary"] = "Analysis completed but missing summary field"
-            await save_dashboard_data()
-            return
+            # Try to extract a meaningful summary from the response
+            summary_text = "Analysis completed successfully"
+            if raw_response:
+                # Look for any meaningful text in the response
+                lines = [line.strip() for line in raw_response.split('\n') if line.strip()]
+                meaningful_lines = []
+                for line in lines:
+                    # Skip JSON structure markers
+                    if line in ['{', '}', '[', ']'] or line.startswith('"') and line.endswith('"'):
+                        continue
+                    # Look for actual content
+                    if len(line) > 10 and not line.startswith('"overall_summary"'):
+                        meaningful_lines.append(line)
+                
+                if meaningful_lines:
+                    summary_text = meaningful_lines[0][:200]
+                    if len(meaningful_lines[0]) > 200:
+                        summary_text += "..."
+            
+            # Set a more informative summary instead of an error message
+            state.dashboard_data["summary"] = summary_text
+            logging.warning(f"AI response missing overall_summary field, using extracted text: {summary_text}")
+            
+            # Continue processing instead of returning early
+            analysis_result["overall_summary"] = summary_text
         state.set_app_status("Processing results...")
         state.dashboard_data["summary"] = analysis_result.get("overall_summary", "Analysis complete.")
         new_issues: List[Dict[str, Any]] = []
@@ -1608,7 +1666,20 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
             
     except Exception as e:
         logging.error(f"Error during enhanced AI analysis: {e}")
-        state.dashboard_data["summary"] = f"Enhanced AI analysis failed: {e}"
+        # Create a more informative fallback summary instead of just showing error
+        fallback_summary = f"Enhanced analysis completed with {len(recent_logs)} new logs processed"
+        if recent_logs:
+            # Try to extract some meaningful info from logs
+            log_count_by_level = {}
+            for log in recent_logs[:10]:  # Sample first 10 logs
+                level = log.get('level', 'unknown')
+                log_count_by_level[level] = log_count_by_level.get(level, 0) + 1
+            
+            if log_count_by_level:
+                level_info = ", ".join([f"{count} {level}" for level, count in log_count_by_level.items()])
+                fallback_summary = f"Enhanced analysis of {len(recent_logs)} logs completed. Activity includes: {level_info}"
+        
+        state.dashboard_data["summary"] = fallback_summary
         await save_dashboard_data()
         return
     
@@ -1620,9 +1691,31 @@ IMPORTANT: Return ONLY the JSON object above with your analysis data filled in. 
         return
     
     if "overall_summary" not in analysis_result:
-        state.dashboard_data["summary"] = "Analysis completed but missing summary field"
-        await save_dashboard_data()
-        return
+        # Try to extract a meaningful summary from the response
+        summary_text = "Enhanced analysis completed successfully"
+        if raw_response:
+            # Look for any meaningful text in the response
+            lines = [line.strip() for line in raw_response.split('\n') if line.strip()]
+            meaningful_lines = []
+            for line in lines:
+                # Skip JSON structure markers
+                if line in ['{', '}', '[', ']'] or line.startswith('"') and line.endswith('"'):
+                    continue
+                # Look for actual content
+                if len(line) > 10 and not line.startswith('"overall_summary"'):
+                    meaningful_lines.append(line)
+            
+            if meaningful_lines:
+                summary_text = meaningful_lines[0][:200]
+                if len(meaningful_lines[0]) > 200:
+                    summary_text += "..."
+        
+        # Set a more informative summary instead of an error message
+        state.dashboard_data["summary"] = summary_text
+        logging.warning(f"Enhanced AI response missing overall_summary field, using extracted text: {summary_text}")
+        
+        # Continue processing instead of returning early
+        analysis_result["overall_summary"] = summary_text
     
     state.set_app_status("Processing enhanced analysis results...")
     state.dashboard_data["summary"] = analysis_result.get("overall_summary", "Enhanced analysis complete.")

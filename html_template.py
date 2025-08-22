@@ -386,12 +386,17 @@ HTML_CONTENT = r"""
                 </div>
             </div>
             <div class="flex items-center gap-3">
-                <button id="find-more-btn" class="btn-primary btn-success">
+                <button id="find-more-btn" class="btn-primary btn-success" title="Keyboard shortcut: Ctrl+F">
                     <span class="flex items-center gap-2">
-                        🔍 Find More Issues
+                        Find More Issues (Ctrl+F)
                     </span>
                 </button>
-                <button id="settings-btn" class="p-3 rounded-xl bg-gray-700/50 hover:bg-gray-600/50 transition-all duration-200">
+                <button id="help-btn" class="p-3 rounded-xl bg-blue-700/50 hover:bg-blue-600/50 transition-all duration-200" title="Keyboard shortcuts (Ctrl+H)">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </button>
+                <button id="settings-btn" class="p-3 rounded-xl bg-gray-700/50 hover:bg-gray-600/50 transition-all duration-200" title="Settings (Ctrl+S)">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                     </svg>
@@ -484,7 +489,7 @@ HTML_CONTENT = r"""
             <!-- Enhanced Statistics -->
             <div class="glass-card p-6">
                 <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
-                    <span class="w-6 h-6 rounded bg-green-500/20 flex items-center justify-center text-green-400">📊</span>
+                    <span class="w-6 h-6 rounded bg-green-500/20 flex items-center justify-center text-green-400 text-xs font-bold">DB</span>
                     System Overview
                 </h2>
                 <div class="grid grid-cols-1 gap-4">
@@ -516,7 +521,7 @@ HTML_CONTENT = r"""
             
             <div class="glass-card p-6 clickable-chart" id="rule-chart-card">
                 <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <span class="w-5 h-5 rounded bg-yellow-500/20 flex items-center justify-center text-yellow-400">🎯</span>
+                    <span class="w-5 h-5 rounded bg-yellow-500/20 flex items-center justify-center text-yellow-400 text-xs font-bold">AI</span>
                     Top Security Rules
                     <span class="text-xs text-gray-500 ml-2">Click to expand</span>
                 </h2>
@@ -706,6 +711,52 @@ HTML_CONTENT = r"""
         <!-- Issues Container with Grid/List toggle -->
         <div id="full-issues-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto custom-scrollbar">
             <!-- All issues will be displayed here -->
+        </div>
+    </div>
+</div>
+
+<!-- Help Modal -->
+<div id="help-modal" class="modal-backdrop">
+    <div class="modal-content" style="max-width: 800px; width: 90vw;">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold">Threat Hunter Pro - Power User Guide</h2>
+            <button id="close-help-modal-btn" class="text-gray-400 hover:text-white text-2xl">×</button>
+        </div>
+        
+        <div class="space-y-6">
+            <div class="glass-card p-4">
+                <h3 class="text-lg font-semibold mb-3 text-blue-400">Keyboard Shortcuts</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div class="flex justify-between"><kbd class="bg-gray-700 px-2 py-1 rounded">Ctrl+F</kbd><span>Find More Issues</span></div>
+                    <div class="flex justify-between"><kbd class="bg-gray-700 px-2 py-1 rounded">Ctrl+R</kbd><span>Refresh Data</span></div>
+                    <div class="flex justify-between"><kbd class="bg-gray-700 px-2 py-1 rounded">Ctrl+S</kbd><span>Open Settings</span></div>
+                    <div class="flex justify-between"><kbd class="bg-gray-700 px-2 py-1 rounded">Ctrl+C</kbd><span>Focus Chat Input</span></div>
+                    <div class="flex justify-between"><kbd class="bg-gray-700 px-2 py-1 rounded">Ctrl+H</kbd><span>Show This Help</span></div>
+                    <div class="flex justify-between"><kbd class="bg-gray-700 px-2 py-1 rounded">Esc</kbd><span>Close Modals</span></div>
+                </div>
+            </div>
+            
+            <div class="glass-card p-4">
+                <h3 class="text-lg font-semibold mb-3 text-green-400">Professional Features</h3>
+                <ul class="space-y-2 text-sm text-gray-300">
+                    <li>• <strong>Advanced Issue Analysis:</strong> Enhanced AI detection with threat categorization</li>
+                    <li>• <strong>Comprehensive Search:</strong> Multi-strategy log retrieval and correlation</li>
+                    <li>• <strong>Professional Interface:</strong> Clean, production-ready design with power user shortcuts</li>
+                    <li>• <strong>Real-time Monitoring:</strong> Continuous background analysis and alerting</li>
+                    <li>• <strong>Export & Integration:</strong> API endpoints for external system integration</li>
+                </ul>
+            </div>
+            
+            <div class="glass-card p-4">
+                <h3 class="text-lg font-semibold mb-3 text-orange-400">Quick Tips</h3>
+                <ul class="space-y-2 text-sm text-gray-300">
+                    <li>• Click on severity badges to filter issues</li>
+                    <li>• Click chart cards to expand detailed views</li>
+                    <li>• Use chat interface for contextual log analysis</li>
+                    <li>• Generate automated remediation scripts for issues</li>
+                    <li>• All data auto-refreshes every 15 seconds</li>
+                </ul>
+            </div>
         </div>
     </div>
 </div>
@@ -1214,7 +1265,7 @@ HTML_CONTENT = r"""
             container.innerHTML = `
                 <div class="col-span-full text-center py-12">
                     <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-500/20 flex items-center justify-center">
-                        <span class="text-2xl">🔍</span>
+                        <span class="text-2xl">SEARCH</span>
                     </div>
                     <p class="text-gray-400 text-lg">${selectedRuleFilter ? `No issues found for rule: ${selectedRuleFilter}` : 'No issues match your filters'}</p>
                     <p class="text-gray-500 text-sm mt-2">Try adjusting your search criteria</p>
@@ -1228,10 +1279,10 @@ HTML_CONTENT = r"""
             issueEl.className = `glass-card p-4 severity-${issue.severity} h-fit`;
             
             const severityIcons = {
-                'Critical': '🚨',
-                'High': '⚠️',
-                'Medium': '🔶',
-                'Low': 'ℹ️'
+                'Critical': 'CRIT',
+                'High': 'HIGH',
+                'Medium': 'MED',
+                'Low': 'LOW'
             };
             
             const severityColors = {
@@ -1275,7 +1326,7 @@ HTML_CONTENT = r"""
                     </summary>
                     <div class="mt-2 p-3 bg-black/20 rounded border border-gray-700/50">
                         <div class="mb-3">
-                            <h4 class="font-semibold text-white text-sm mb-1">🎯 Actions:</h4>
+                            <h4 class="font-semibold text-white text-sm mb-1"> Actions:</h4>
                             <div class="text-gray-300 text-sm">${renderMarkdown(issue.recommendation.substring(0, 200))}${issue.recommendation.length > 200 ? '...' : ''}</div>
                         </div>
                         <div>
@@ -1350,8 +1401,8 @@ HTML_CONTENT = r"""
         );
         
         // Update both issue displays
-        updateSecurityIssuesDisplay(securityIssues.slice(0, 10));
-        updateOperationalIssuesDisplay(operationalIssues.slice(0, 10));
+        updateSecurityIssuesDisplay(securityIssues);
+        updateOperationalIssuesDisplay(operationalIssues);
         
         // Update charts
         updateCharts(data);
@@ -1384,7 +1435,7 @@ HTML_CONTENT = r"""
             container.innerHTML = `
                 <div class="text-center py-12">
                     <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500/20 flex items-center justify-center">
-                        <span class="text-2xl">✅</span>
+                        <span class="text-2xl">OK</span>
                     </div>
                     <p class="text-gray-400 text-lg">No security issues found</p>
                     <p class="text-gray-500 text-sm mt-2">Your systems appear secure</p>
@@ -1408,10 +1459,10 @@ HTML_CONTENT = r"""
                 issueEl.style.animationDelay = `${index * 0.1}s`;
                 
                 const severityIcons = {
-                    'Critical': '🚨',
-                    'High': '⚠️',
-                    'Medium': '🔶',
-                    'Low': 'ℹ️'
+                    'Critical': 'CRIT',
+                    'High': 'HIGH',
+                    'Medium': 'MED',
+                    'Low': 'LOW'
                 };
                 
                 const severityColors = {
@@ -1464,7 +1515,7 @@ HTML_CONTENT = r"""
                         </summary>
                         <div class="mt-3 p-4 bg-black/20 rounded-lg border border-gray-700/50" onclick="event.stopPropagation();">
                             <div class="mb-4">
-                                <h4 class="font-semibold text-white mb-2">🎯 Recommended Actions:</h4>
+                                <h4 class="font-semibold text-white mb-2"> Recommended Actions:</h4>
                                 <div class="text-gray-300 whitespace-pre-wrap leading-relaxed">${renderMarkdown(recommendation)}</div>
                             </div>
                             <div>
@@ -1567,10 +1618,10 @@ HTML_CONTENT = r"""
         issueEl.style.animationDelay = `${index * 0.1}s`;
         
         const severityIcons = {
-            'Critical': '🚨',
-            'High': '⚠️',
-            'Medium': '🔶',
-            'Low': 'ℹ️'
+            'Critical': 'CRIT',
+            'High': 'HIGH',
+            'Medium': 'MED',
+            'Low': 'LOW'
         };
         
         const severityColors = {
@@ -1676,7 +1727,7 @@ HTML_CONTENT = r"""
         if (data.rule_distribution && Object.keys(data.rule_distribution).length > 0) {
             const sortedRules = Object.entries(data.rule_distribution)
                 .sort(([,a],[,b]) => b-a)
-                .slice(0, 10);
+;
             
             ruleDistChart.data.labels = sortedRules.map(([rule]) => 
                 rule.length > 30 ? rule.substring(0, 27) + '...' : rule
@@ -1770,7 +1821,7 @@ HTML_CONTENT = r"""
             console.error("Failed to trigger analysis:", error);
             showToast('Failed to trigger analysis', 'error');
         } finally {
-            setLoadingState(btn, false, '🔍 Find More Issues');
+            setLoadingState(btn, false, 'SEARCH Find More Issues');
             document.getElementById('issues-loading').classList.add('hidden');
         }
     }
@@ -1956,8 +2007,14 @@ HTML_CONTENT = r"""
         const container = document.getElementById('full-issues-container');
         const titleElement = document.getElementById('full-issues-modal-title');
         
-        allIssues = issues; // Store for filtering
+        // Store for filtering - use a separate variable to avoid overwriting global allIssues
+        window.currentModalIssues = issues || [];
         titleElement.textContent = modalTitle;
+        
+        // Reset filters when opening modal
+        document.getElementById('modal-severity-filter').value = '';
+        document.getElementById('modal-sort-issues').value = 'timestamp-desc';
+        document.getElementById('modal-search-issues').value = '';
         
         displayModalIssues(issues);
         modal.style.display = 'flex';
@@ -1971,13 +2028,14 @@ HTML_CONTENT = r"""
             return;
         }
         
+        console.log('displayModalIssues called with', issues ? issues.length : 0, 'issues');
         container.innerHTML = '';
         
         if (!issues || issues.length === 0) {
             container.innerHTML = `
                 <div class="col-span-full text-center py-12">
-                    <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500/20 flex items center justify-center">
-                        <span class="text-2xl">✅</span>
+                    <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500/20 flex items-center justify-center">
+                        <span class="text-2xl">OK</span>
                     </div>
                     <p class="text-gray-400 text-lg">No security issues match your filters</p>
                     <p class="text-gray-500 text-sm mt-2">Try adjusting your search criteria</p>
@@ -1994,7 +2052,7 @@ HTML_CONTENT = r"""
         }
         
         // Limit issues to prevent performance issues
-        const issuesToDisplay = issues.slice(0, 100); // Show max 100 issues in modal
+        const issuesToDisplay = issues; // Show all issues in modal
         
         console.log(`Displaying ${issuesToDisplay.length} issues in modal`);
         
@@ -2004,10 +2062,10 @@ HTML_CONTENT = r"""
                 issueEl.className = `glass-card p-4 severity-${issue.severity} ${isGridView ? 'h-fit' : ''}`;
                 
                 const severityIcons = {
-                    'Critical': '🚨',
-                    'High': '⚠️',
-                    'Medium': '🔶',
-                    'Low': 'ℹ️'
+                    'Critical': 'CRIT',
+                    'High': 'HIGH',
+                    'Medium': 'MED',
+                    'Low': 'LOW'
                 };
                 
                 const severityColors = {
@@ -2053,7 +2111,7 @@ HTML_CONTENT = r"""
                         </summary>
                         <div class="mt-2 p-3 bg-black/20 rounded border border-gray-700/50" onclick="event.stopPropagation();">
                             <div class="mb-3">
-                                <h4 class="font-semibold text-white text-sm mb-1">🎯 Actions:</h4>
+                                <h4 class="font-semibold text-white text-sm mb-1"> Actions:</h4>
                                 <div class="text-gray-300 text-sm">${renderMarkdown((issue.recommendation || 'No recommendations available').substring(0, 200))}${(issue.recommendation && issue.recommendation.length > 200) ? '...' : ''}</div>
                             </div>
                             <div>
@@ -2098,7 +2156,8 @@ HTML_CONTENT = r"""
         const sortBy = document.getElementById('modal-sort-issues').value;
         const searchTerm = document.getElementById('modal-search-issues').value.toLowerCase();
         
-        let filteredIssues = [...allIssues];
+        // Use currentModalIssues instead of allIssues to preserve category filtering
+        let filteredIssues = [...(window.currentModalIssues || allIssues)];
         
         // Apply severity filter
         if (severityFilter) {
@@ -2333,6 +2392,17 @@ HTML_CONTENT = r"""
         showToast('Script downloaded successfully!');
     };
 
+    // Help modal functionality
+    function showHelpModal() {
+        const modal = document.getElementById('help-modal');
+        modal.style.display = 'flex';
+    }
+    
+    document.getElementById('help-btn').onclick = showHelpModal;
+    document.getElementById('close-help-modal-btn').onclick = () => {
+        document.getElementById('help-modal').style.display = 'none';
+    };
+
     // Settings handling
     document.getElementById('settings-form').addEventListener('submit', (event) => {
         event.preventDefault();
@@ -2341,7 +2411,7 @@ HTML_CONTENT = r"""
     });
 
     document.getElementById('clear-db-btn').addEventListener('click', () => {
-        if (confirm('⚠️ Are you sure you want to clear the entire database? This action cannot be undone and will remove all logs, issues, and analysis data.')) {
+        if (confirm('WARNING: Are you sure you want to clear the entire database? This action cannot be undone and will remove all logs, issues, and analysis data.')) {
             clearDatabase();
         }
     });
@@ -2390,6 +2460,52 @@ HTML_CONTENT = r"""
             showToast('Failed to clear database', 'error');
         }
     }
+
+    // Power user keyboard shortcuts
+    document.addEventListener('keydown', (event) => {
+        // Check if user is typing in an input field
+        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+            return;
+        }
+        
+        if (event.ctrlKey) {
+            switch(event.key) {
+                case 'f':
+                case 'F':
+                    event.preventDefault();
+                    document.getElementById('find-more-btn').click();
+                    break;
+                case 'r':
+                case 'R':
+                    event.preventDefault();
+                    fetchData();
+                    showToast('Data refreshed', 'success');
+                    break;
+                case 's':
+                case 'S':
+                    event.preventDefault();
+                    document.getElementById('settings-btn').click();
+                    break;
+                case 'c':
+                case 'C':
+                    event.preventDefault();
+                    document.getElementById('query-input').focus();
+                    break;
+                case 'h':
+                case 'H':
+                    event.preventDefault();
+                    showHelpModal();
+                    break;
+            }
+        }
+        
+        if (event.key === 'Escape') {
+            // Close any open modals
+            document.querySelectorAll('.modal-backdrop').forEach(modal => {
+                modal.style.display = 'none';
+            });
+        }
+    });
 
     // Initialize everything
     document.addEventListener('DOMContentLoaded', () => {
